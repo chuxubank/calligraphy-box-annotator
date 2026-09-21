@@ -1,0 +1,17 @@
+# Local overrides. config.example.json is the demo config used when this is absent.
+config.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Local annotation data and cropped glyphs
+boxes.json
+cropped/
+
+# Scratch
+*.tmp
+.DS_Store
