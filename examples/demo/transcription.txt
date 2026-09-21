@@ -1,0 +1,8 @@
+# Synthetic demo transcription.
+# Lines starting with # are comments and are not used as labels.
+# Only CJK Unified Ideographs (U+4E00–U+9FFF) become labels.
+# plate-01 is two columns, right to left: 甲乙丙丁 then 戊己庚辛.
+# plate-02 continues the text. Set its 释文起点 to 8.
+
+甲乙丙丁戊己庚辛
+子丑寅卯辰巳午未

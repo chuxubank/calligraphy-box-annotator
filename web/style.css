@@ -1,0 +1,55 @@
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; height: 100%;
+  font-family: "PingFang SC", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+  background: #1a1b1e; color: #e8e8ea;
+}
+body {
+  display: flex; flex-direction: column; min-height: 100%; overflow: hidden;
+}
+.brand {
+  font-weight: 600; letter-spacing: 0.06em; font-size: 16px; margin-right: 4px;
+}
+.toolbar {
+  display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center;
+  padding: 10px 14px; background: #2a2b30; border-bottom: 1px solid #3d3e45;
+  position: sticky; top: 0; z-index: 10;
+}
+.group { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+button, select, input[type="number"] {
+  font: inherit; font-size: 15px; padding: 8px 14px;
+  border-radius: 6px; border: 1px solid #555; background: #3a3b42; color: #fff;
+  cursor: pointer;
+}
+input[type="number"] {
+  width: 5.5em; cursor: text; padding: 8px 10px;
+}
+button:hover { background: #4a4b55; }
+button:active { transform: translateY(1px); }
+button.primary { background: #2f6fed; border-color: #2f6fed; }
+button.primary:hover { background: #4580f5; }
+button.danger { background: #a33; border-color: #a33; }
+.plate-select, .text-offset-label {
+  display: flex; gap: 6px; align-items: center; font-size: 15px;
+}
+.text-progress { font-size: 14px; color: #c8c9ce; white-space: nowrap; }
+.status { margin-left: auto; display: flex; gap: 14px; flex-wrap: wrap; font-size: 14px; color: #c8c9ce; align-items: center; }
+#statMsg { color: #7dcea0; min-width: 8em; }
+.text-preview {
+  font-family: "Songti SC", "Noto Serif SC", "SimSun", serif;
+  letter-spacing: 0.05em; color: #f0e6c8;
+}
+.sel-char {
+  font-family: "Songti SC", "Noto Serif SC", "SimSun", serif;
+  font-size: 22px; font-weight: 600; color: #fbbf24; min-width: 1.2em;
+  line-height: 1;
+}
+.workspace {
+  flex: 1 1 auto; min-height: 0; overflow: hidden; background: #111;
+  cursor: crosshair; position: relative;
+}
+#canvas { display: block; outline: none; }
+.hint {
+  padding: 8px 14px; font-size: 13px; color: #9a9ba3;
+  border-top: 1px solid #3d3e45; background: #222328;
+}
