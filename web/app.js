@@ -21,7 +21,7 @@
     selectedId: null, zoom: 1, panX: 0, panY: 0, history: [], dirty: false,
     mode: "idle", drawStart: null, draft: null, moveOffset: null,
     resizeHandle: null, spaceDown: false, lastPointer: null,
-    chars: [], textOffsetByPlate: {},
+    chars: [], textOffsetByPlate: {}, labelMode: "offset",
   };
   function plateId() { return state.plates[state.plateIndex] || null; }
   function boxes() {
@@ -82,7 +82,10 @@
     }
     return ordered;
   }
-  function assignCharsForPlate(pid) {
+  function assignCharsForPlate(pid, force) {
+    // labelMode "fixed": labels were aligned per column. Moving a box must not
+    // re-derive every label from the running plate offset. 重贴标签 passes force.
+    if (state.labelMode === "fixed" && !force) return;
     const list = state.boxesByPlate[pid] || [];
     const start = typeof state.textOffsetByPlate[pid] === "number"
       ? Math.max(0, Math.floor(state.textOffsetByPlate[pid]))
@@ -93,10 +96,19 @@
       ordered[i].char = (idx >= 0 && idx < state.chars.length) ? state.chars[idx] : "";
     }
   }
-  function assignCharsCurrent() {
+  function assignCharsCurrent(force) {
     const id = plateId();
     if (!id) return;
-    assignCharsForPlate(id);
+    assignCharsForPlate(id, force);
+  }
+  function selectedBox() {
+    return boxes().find(function (b) { return b.id === state.selectedId; }) || null;
+  }
+  function reasonLabel(reason) {
+    if (reason === "repair") return "补纸";
+    if (reason === "blank") return "空白";
+    if (reason === "damaged") return "残损";
+    return "";
   }
   function pushHistory() {
     const id = plateId();
@@ -143,9 +155,23 @@
       els.statPreview.textContent = preview ? ("释文: " + preview + (total > start + 8 ? "…" : "")) : "";
     }
     if (els.statSelChar) {
-      const sel = boxes().find(function (b) { return b.id === state.selectedId; });
-      els.statSelChar.textContent = (sel && sel.char) ? sel.char : "";
+      const sel = selectedBox();
+      let label = (sel && sel.char) ? sel.char : "";
+      if (sel && sel.repeatMark) label += " 重文";
+      if (sel && sel.noCard) label += " 不制卡" + (reasonLabel(sel.noCardReason) ? ("·" + reasonLabel(sel.noCardReason)) : "");
+      els.statSelChar.textContent = label;
     }
+    const repeatBtn = document.getElementById("btnRepeat");
+    const noCardBtn = document.getElementById("btnNoCard");
+    const reasonSel = document.getElementById("noCardReason");
+    const modeSel = document.getElementById("labelMode");
+    const selBox = selectedBox();
+    if (repeatBtn) repeatBtn.classList.toggle("active", !!(selBox && selBox.repeatMark));
+    if (noCardBtn) noCardBtn.classList.toggle("active", !!(selBox && selBox.noCard));
+    if (reasonSel && selBox && selBox.noCardReason && document.activeElement !== reasonSel) {
+      reasonSel.value = selBox.noCardReason;
+    }
+    if (modeSel && document.activeElement !== modeSel) modeSel.value = state.labelMode || "offset";
     if (els.textOffsetInput && document.activeElement !== els.textOffsetInput) {
       els.textOffsetInput.value = String(start);
       els.textOffsetInput.max = String(Math.max(0, total));
@@ -219,8 +245,16 @@
     const bh = fontPx + padY * 2;
     const bx = b.x;
     const by = b.y;
-    ctx.fillStyle = sel ? "rgba(47,111,237,0.92)" : "rgba(15,23,42,0.88)";
-    ctx.strokeStyle = sel ? "#93c5fd" : "#f8fafc";
+    if (b.repeatMark && !b.noCard) {
+      ctx.fillStyle = "rgba(75,85,99,0.92)";
+      ctx.strokeStyle = "#d1d5db";
+    } else if (b.noCard) {
+      ctx.fillStyle = "rgba(3,105,161,0.92)";
+      ctx.strokeStyle = "#7dd3fc";
+    } else {
+      ctx.fillStyle = sel ? "rgba(47,111,237,0.92)" : "rgba(15,23,42,0.88)";
+      ctx.strokeStyle = sel ? "#93c5fd" : "#f8fafc";
+    }
     ctx.lineWidth = 1 / state.zoom;
     const r = 2 / state.zoom;
     // rounded-ish rect via path
@@ -241,6 +275,26 @@
     ctx.textBaseline = "top";
     ctx.fillText(ch, bx + padX, by + padY);
   }
+  function drawFlagTag(b) {
+    const tags = [];
+    if (b.repeatMark) tags.push("重文");
+    if (b.noCard) tags.push(reasonLabel(b.noCardReason) || "不制卡");
+    if (!tags.length) return;
+    const fontPx = Math.max(11, 13) / state.zoom;
+    ctx.font = "600 " + fontPx + "px sans-serif";
+    ctx.textBaseline = "top";
+    const text = tags.join(" ");
+    const pad = 3 / state.zoom;
+    const tw = ctx.measureText(text).width;
+    const bw = tw + pad * 2;
+    const bh = fontPx + pad * 2;
+    const bx = b.x + b.w - bw;
+    const by = b.y;
+    ctx.fillStyle = b.noCard ? "rgba(3,105,161,0.92)" : "rgba(55,65,81,0.92)";
+    ctx.fillRect(bx, by, bw, bh);
+    ctx.fillStyle = "#f8fafc";
+    ctx.fillText(text, bx + pad, by + pad);
+  }
   function draw() {
     const wrap = els.canvas.parentElement;
     const w = wrap.clientWidth, h = wrap.clientHeight;
@@ -259,13 +313,31 @@
     for (let i = 0; i < list.length; i++) {
       const b = list[i];
       const sel = b.id === state.selectedId;
+      let stroke = sel ? "#2f6fed" : "#22c55e";
+      let fill = sel ? "rgba(47,111,237,0.18)" : "rgba(34,197,94,0.12)";
+      if (b.noCard) {
+        stroke = sel ? "#38bdf8" : "#0284c7";
+        fill = "rgba(14,165,233,0.20)";
+      } else if (b.repeatMark) {
+        stroke = sel ? "#e5e7eb" : "#9ca3af";
+        fill = "rgba(156,163,175,0.22)";
+      }
       ctx.lineWidth = (sel ? 2.5 : 1.5) / state.zoom;
-      ctx.strokeStyle = sel ? "#2f6fed" : "#22c55e";
-      ctx.fillStyle = sel ? "rgba(47,111,237,0.18)" : "rgba(34,197,94,0.12)";
+      ctx.strokeStyle = stroke;
+      ctx.fillStyle = fill;
       ctx.fillRect(b.x, b.y, b.w, b.h);
       ctx.strokeRect(b.x, b.y, b.w, b.h);
+      if (b.noCard) {
+        ctx.beginPath();
+        ctx.moveTo(b.x, b.y);
+        ctx.lineTo(b.x + b.w, b.y + b.h);
+        ctx.stroke();
+      }
+      drawFlagTag(b);
       // small id at bottom-left (secondary); char badge at top-left
-      ctx.fillStyle = sel ? "rgba(47,111,237,0.85)" : "rgba(22,163,74,0.75)";
+      ctx.fillStyle = b.noCard
+        ? "rgba(2,132,199,0.9)"
+        : (b.repeatMark ? "rgba(75,85,99,0.9)" : (sel ? "rgba(47,111,237,0.85)" : "rgba(22,163,74,0.75)"));
       ctx.font = (10 / state.zoom) + "px sans-serif";
       ctx.textBaseline = "alphabetic";
       ctx.fillText("#" + b.id, b.x + 2 / state.zoom, b.y + b.h - 3 / state.zoom);
@@ -431,10 +503,43 @@
     if (!id) return;
     pushHistory();
     setTextOffset(els.textOffsetInput ? els.textOffsetInput.value : getTextOffset());
-    assignCharsCurrent();
+    assignCharsCurrent(true);
     state.dirty = true;
     updateStatus(); draw();
-    msg("已重贴标签 · 起点 " + getTextOffset());
+    msg((state.labelMode === "fixed" ? "已按起点覆盖固定标签 · 起点 " : "已重贴标签 · 起点 ") + getTextOffset());
+  }
+  function toggleRepeat() {
+    const b = selectedBox();
+    if (!b) { msg("未选中框", false); return; }
+    pushHistory();
+    b.repeatMark = !b.repeatMark;
+    state.dirty = true;
+    updateStatus(); draw();
+    msg(b.repeatMark ? "已标重文点" : "已取消重文点");
+  }
+  function toggleNoCard() {
+    const b = selectedBox();
+    if (!b) { msg("未选中框", false); return; }
+    pushHistory();
+    b.noCard = !b.noCard;
+    if (b.noCard) {
+      const reasonSel = document.getElementById("noCardReason");
+      const reason = reasonSel ? reasonSel.value : "damaged";
+      b.noCardReason = reason === "repair" || reason === "blank" || reason === "damaged" ? reason : "damaged";
+    } else {
+      b.noCardReason = "";
+    }
+    state.dirty = true;
+    updateStatus(); draw();
+    msg(b.noCard ? ("不制卡 · " + reasonLabel(b.noCardReason)) : "已取消不制卡");
+  }
+  function setLabelMode(mode) {
+    const next = mode === "fixed" ? "fixed" : "offset";
+    if (next === state.labelMode) return;
+    state.labelMode = next;
+    state.dirty = true;
+    updateStatus();
+    msg(next === "fixed" ? "标签模式：固定（移动框不会重贴）" : "标签模式：跟随起点");
   }
   function zoomAt(factor, pivot) {
     const wrap = els.canvas.parentElement;
@@ -482,6 +587,7 @@
     assignCharsCurrent();
     const body = {
       source: "manual",
+      labelMode: state.labelMode === "fixed" ? "fixed" : "offset",
       textOffsetByPlate: {},
       plates: {},
     };
@@ -493,6 +599,15 @@
       body.plates[pid] = (state.boxesByPlate[pid] || []).map(function (b) {
         const item = { id: b.id, x: b.x, y: b.y, w: b.w, h: b.h };
         if (b.char) item.char = b.char;
+        if (typeof b.col === "number" && isFinite(b.col)) item.col = Math.round(b.col);
+        if (typeof b.ti === "number" && isFinite(b.ti)) item.ti = Math.round(b.ti);
+        if (b.repeatMark === true) item.repeatMark = true;
+        if (b.noCard === true) {
+          item.noCard = true;
+          if (b.noCardReason === "repair" || b.noCardReason === "blank" || b.noCardReason === "damaged") {
+            item.noCardReason = b.noCardReason;
+          }
+        }
         return item;
       });
     }
@@ -521,6 +636,7 @@
     state.chars = Array.isArray(textData.chars) ? textData.chars : [];
     state.boxesByPlate = {};
     state.textOffsetByPlate = {};
+    state.labelMode = boxesData.labelMode === "fixed" ? "fixed" : "offset";
     const savedOffsets = boxesData.textOffsetByPlate || {};
     for (let i = 0; i < state.plates.length; i++) {
       const pid = state.plates[i];
@@ -529,6 +645,11 @@
         return {
           id: b.id, x: b.x, y: b.y, w: b.w, h: b.h,
           char: typeof b.char === "string" ? b.char : "",
+          col: typeof b.col === "number" ? b.col : undefined,
+          ti: typeof b.ti === "number" ? b.ti : undefined,
+          repeatMark: b.repeatMark === true,
+          noCard: b.noCard === true,
+          noCardReason: typeof b.noCardReason === "string" ? b.noCardReason : "",
         };
       });
       const off = savedOffsets[pid];
@@ -555,6 +676,24 @@
     document.getElementById("btnZoomOut").onclick = function () { zoomAt(1 / 1.15); };
     document.getElementById("btnZoomReset").onclick = function () { fitZoom(); updateStatus(); draw(); };
     document.getElementById("btnRelabel").onclick = relabelCurrent;
+    const repeatBtn = document.getElementById("btnRepeat");
+    const noCardBtn = document.getElementById("btnNoCard");
+    const modeSel = document.getElementById("labelMode");
+    const reasonSel = document.getElementById("noCardReason");
+    if (repeatBtn) repeatBtn.onclick = toggleRepeat;
+    if (noCardBtn) noCardBtn.onclick = toggleNoCard;
+    if (modeSel) modeSel.addEventListener("change", function () { setLabelMode(modeSel.value); });
+    if (reasonSel) {
+      reasonSel.addEventListener("change", function () {
+        const b = selectedBox();
+        if (!b || !b.noCard) return;
+        pushHistory();
+        b.noCardReason = reasonSel.value;
+        state.dirty = true;
+        updateStatus(); draw();
+        msg("不制卡 · " + reasonLabel(b.noCardReason));
+      });
+    }
     if (els.textOffsetInput) {
       els.textOffsetInput.addEventListener("change", function () {
         pushHistory();

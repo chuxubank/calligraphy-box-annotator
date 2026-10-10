@@ -1,0 +1,23 @@
+{
+  "source": "manual",
+  "labelMode": "fixed",
+  "textOffsetByPlate": {
+    "plate-01": 0,
+    "plate-02": 8
+  },
+  "plates": {
+    "plate-01": [
+      {"id": 1, "col": 1, "ti": 0, "x": 321, "y": 83, "w": 150, "h": 148, "char": "甲"},
+      {"id": 2, "col": 1, "ti": 1, "x": 321, "y": 242, "w": 150, "h": 148, "char": "乙", "repeatMark": true},
+      {"id": 3, "col": 1, "ti": 2, "x": 321, "y": 400, "w": 150, "h": 148, "char": "丙"},
+      {"id": 4, "col": 1, "ti": 3, "x": 321, "y": 559, "w": 150, "h": 148, "char": "丁"},
+      {"id": 5, "col": 2, "ti": 4, "x": 89, "y": 83, "w": 150, "h": 148, "char": "戊", "noCard": true, "noCardReason": "blank"},
+      {"id": 6, "col": 2, "ti": 5, "x": 89, "y": 242, "w": 150, "h": 148, "char": "己"},
+      {"id": 7, "col": 2, "ti": 6, "x": 89, "y": 400, "w": 150, "h": 148, "char": "庚"},
+      {"id": 8, "col": 2, "ti": 7, "x": 89, "y": 559, "w": 150, "h": 148, "char": "辛"}
+    ],
+    "plate-02": [
+      {"id": 9, "col": 1, "ti": 8, "x": 321, "y": 83, "w": 150, "h": 148, "char": "子", "noCard": true, "noCardReason": "damaged"}
+    ]
+  }
+}

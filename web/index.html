@@ -23,11 +23,28 @@
       <button type="button" id="btnSave" class="primary" title="S">保存</button>
     </div>
     <div class="group text-offset-group">
-      <label class="text-offset-label" title="当前图版阅读顺序第一个框对应的释文全局下标">释文起点
+      <label class="text-offset-label" title="跟随起点：按图版释文起点自动贴标签。固定：保留每个框自己的字，移动框不会把后面的字全部错位。">标签
+        <select id="labelMode">
+          <option value="offset">跟随起点</option>
+          <option value="fixed">固定</option>
+        </select>
+      </label>
+      <label class="text-offset-label" title="当前图版阅读顺序第一个框对应的释文全局下标。固定模式下只在点「重贴标签」时使用。">释文起点
         <input type="number" id="textOffsetInput" min="0" step="1" value="0" />
       </label>
       <button type="button" id="btnRelabel">重贴标签</button>
       <span id="statTextProgress" class="text-progress">释文: 0/0</span>
+    </div>
+    <div class="group">
+      <button type="button" id="btnRepeat" title="选中框是重文点：保留标签，制卡时不能当作异写">重文点</button>
+      <button type="button" id="btnNoCard" title="选中框保留位置和标签，但不制卡">不制卡</button>
+      <label class="text-offset-label">原因
+        <select id="noCardReason">
+          <option value="repair">补纸</option>
+          <option value="blank">空白</option>
+          <option value="damaged">残损</option>
+        </select>
+      </label>
     </div>
     <div class="group">
       <button type="button" id="btnZoomOut">缩小</button>
@@ -48,7 +65,8 @@
   </main>
   <footer class="hint">
     拖拽绘制矩形 · 点击选中 · 拖动边角缩放 · 滚轮缩放 · 空格/中键拖动画布 · 坐标：完整图像像素空间（含边框）
-    · 框标签按列右→左、列内上→下对应释文；改「释文起点」后点「重贴标签」
+    · 跟随起点时，框标签按列右→左、列内上→下对应释文；固定模式下几何变化不重贴，点「重贴标签」才覆盖
+    · 灰框「重文」是重文点；蓝框斜线是不制卡（补纸 / 空白 / 残损）
   </footer>
   <script src="app.js"></script>
 </body>

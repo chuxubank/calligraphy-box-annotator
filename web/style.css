@@ -28,6 +28,7 @@ button:hover { background: #4a4b55; }
 button:active { transform: translateY(1px); }
 button.primary { background: #2f6fed; border-color: #2f6fed; }
 button.primary:hover { background: #4580f5; }
+button.active { outline: 2px solid #fbbf24; background: #4b5563; }
 button.danger { background: #a33; border-color: #a33; }
 .plate-select, .text-offset-label {
   display: flex; gap: 6px; align-items: center; font-size: 15px;
