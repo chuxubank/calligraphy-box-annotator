@@ -721,6 +721,44 @@ def cmd_cut(args: argparse.Namespace) -> int:
     return emit(payload, args.json, "\n".join(lines))
 
 
+def cmd_anki(args: argparse.Namespace) -> int:
+    from cba.anki import DeckError, build_apkg, deck_filename
+
+    ctx = Context(args, need_boxes=True, need_review=False)
+    if not ctx.plate_ids:
+        raise CliError(f"no plates in {display_path(ctx.settings.plates_dir)}")
+    deck_name = (args.deck_name or "").strip()
+    if not deck_name or any(ch in deck_name for ch in "\r\n\x00"):
+        raise CliError("--deck-name must be a non-empty single-line name")
+    if len(deck_name) > 200:
+        raise CliError("--deck-name is too long")
+    front = args.front or "image"
+    if front not in ("image", "char"):
+        raise CliError("--front must be image or char")
+    if args.out:
+        out_path = _resolve_user_path(args.out, _data_dir(args))
+        if out_path.suffix.lower() != ".apkg":
+            out_path = out_path.with_name(out_path.name + ".apkg")
+    else:
+        out_path = _data_dir(args) / deck_filename(deck_name)
+    try:
+        summary = build_apkg(ctx.plates, ctx.document, deck_name, out_path, front=front)
+    except DeckError as exc:
+        return fail(str(exc), args.json, **exc.extra)
+    except OSError as exc:
+        raise CliError(f"cannot write deck: {exc}") from exc
+    payload = {"ok": True, "out": display_path(out_path)}
+    payload.update(summary)
+    text = (
+        f"wrote {payload['out']}\n"
+        f"deck {summary['deck']}  front {summary['front']}  "
+        f"notes {summary['notes']}  media {summary['media']}  "
+        f"skipped repeat {summary['skippedRepeat']}  noCard {summary['skippedNoCard']}  "
+        f"{summary['bytes']} bytes"
+    )
+    return emit(payload, args.json, text)
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """Launch the annotator. Blocks until the process is interrupted."""
     from serve import main as serve_main
@@ -808,6 +846,27 @@ def build_parser() -> argparse.ArgumentParser:
     cut.add_argument("--per-column", type=int, default=4, help="exact box count inside each column")
     cut.add_argument("--plate", help="plate id (default: the first plate)")
 
+    anki = sub.add_parser(
+        "anki",
+        help="build an Anki deck: one note per character, glyph JPEGs as media files",
+    )
+    add_shared(anki)
+    anki.add_argument(
+        "--deck-name",
+        default="calligraphy",
+        help="deck name; also seeds stable deck, model, and note ids (default: calligraphy)",
+    )
+    anki.add_argument(
+        "--out",
+        help="output .apkg path (default: <deck-name>.apkg in the data directory)",
+    )
+    anki.add_argument(
+        "--front",
+        choices=("image", "char"),
+        default="image",
+        help="card front: one glyph image (default) or the character; the back lists every variant",
+    )
+
     serve = sub.add_parser("serve", help="launch the annotator web UI")
     add_shared(serve)
     return parser
@@ -821,6 +880,7 @@ _HANDLERS = {
     "validate": cmd_validate,
     "review": cmd_review,
     "cut": cmd_cut,
+    "anki": cmd_anki,
     "serve": cmd_serve,
 }
 
