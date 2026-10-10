@@ -6,7 +6,7 @@
 
 ## 环境
 
-- Python 3.10 或更高版本
+- Python 3.9 或更高版本
 - 标注服务只用标准库
 - 裁切单字、以及重新生成示例图，需要 [Pillow](https://python-pillow.org/)
 
@@ -15,6 +15,30 @@ python -m pip install -r requirements.txt
 ```
 
 系统里如果没有 `python` 命令，把下面的 `python` 换成 `python3`。
+
+### 安装成 `cba` 命令
+
+用 [uv](https://docs.astral.sh/uv/) 可以装成命令 `cba`，装好后不必留在仓库目录里。安装包带上网页（`web/`）、`tools/` 和合成示例图。写出的 `boxes.json`、裁切图、审阅图和对照表都在当前目录，或在 `--data-dir` 指定的目录，不会写进安装包。
+
+```bash
+# 在本仓库里安装
+uv tool install .
+
+# 从 GitHub 安装。要装某一分支，在地址后加 @分支名
+uv tool install git+https://github.com/AsahiArt/calligraphy-box-annotator
+
+# 不长期安装，直接跑一次
+uvx --from git+https://github.com/AsahiArt/calligraphy-box-annotator cba --help
+```
+
+```bash
+cba --help
+cba status --json
+cba validate --json
+cba serve --data-dir ./data --port 8765
+```
+
+`python -m cba` 仍然可用：在仓库根目录用源码运行，或在已经装了这个包的 Python 里运行。`cba serve` 和 `python serve.py` 打开的是同一个标注页面。没有自己的图版时，`cba serve` 只读包里的示例图，并把 `boxes.json` 写到数据目录。
 
 ## 一分钟试用
 
@@ -47,7 +71,7 @@ cp config.example.json config.json
 
 ## 配置
 
-`config.json`（可选）和 `config.example.json` 使用同一组字段。配置文件里的相对路径，相对于该配置文件所在目录。命令行参数和环境变量里的相对路径，相对于当前工作目录。
+`config.json`（可选）和 `config.example.json` 使用同一组字段。配置文件里的相对路径，相对于该配置文件所在目录。命令行参数和环境变量里的相对路径，相对于 `--data-dir`（或环境变量 `CBA_DATA_DIR`）。两者都没给时，这个目录就是当前工作目录。
 
 | 字段 | 含义 | 示例默认值 |
 | --- | --- | --- |
@@ -61,12 +85,13 @@ cp config.example.json config.json
 | `crop_out` | 裁切输出目录 | `cropped` |
 | `cjk_font` | 对照表用的中文字体文件；留空则自动找系统字体 | （空） |
 
-优先级：命令行 > 环境变量 > `config.json` > `config.example.json` > 内置默认值（与示例文件相同）。
+优先级：命令行 > 环境变量 > `config.json` > 源码检出时的 `config.example.json` > 内置默认值。在仓库里跑、又没有指定数据目录时，没有 `config.json` 就会用仓库根目录的 `config.example.json`。装好的 `cba` 如果数据目录里也没有 `config.json`，图版和释文改读安装包里的示例，`boxes.json` 和裁切目录则放在数据目录。
 
 环境变量：
 
 | 变量 | 对应字段 |
 | --- | --- |
+| `CBA_DATA_DIR` | 数据目录（等同 `--data-dir`） |
 | `CBA_CONFIG` | 配置文件路径 |
 | `CBA_HOST` | `host` |
 | `CBA_PORT` | `port` |
@@ -179,15 +204,33 @@ python tools/contact_sheet.py --lowconf examples/demo/lowconf.example.json --out
 python tools/apply_column_spec.py --spec path/to/spec.json --label fix-1
 ```
 
+## 给 AI 代理用
+
+看图的是代理自己的视觉。本仓库不调用模型 API，也不读取 API key。在仓库根目录按 [AGENTS.md](AGENTS.md) 操作：先看哪些列还没审，导出一列的图和释文，对照 [docs/CURSIVE_RULES.md](docs/CURSIVE_RULES.md)，把能确定的改动写成 spec 再写回，拿不准的列留给人。
+
+```bash
+python -m cba status --json
+python -m cba validate --json
+python -m cba export-column --plate plate-01 --col 1 --json
+# 装成命令之后也可以：
+cba status --json
+uvx --from git+https://github.com/AsahiArt/calligraphy-box-annotator cba status --json
+```
+
+`status` 列出每张图版、每一列的框数，以及还没看过的列。审阅进度在 `boxes.json` 旁边的 `boxes.review.json`，中断后重新运行 `status` 即可继续。人标成 `approved` 的列不会被改写。
+
 ## 开发
 
 ```
 serve.py            本地 HTTP 服务
 crop_glyphs.py      按 boxes.json 裁切单字
 boxannotator.py     配置、图版发现、校验与裁切
+cba/                代理用命令行（cba，或 python -m cba）
+pyproject.toml      用 uv 安装时的包配置，控制台命令是 cba
 tools/              列切分、对照表、spec 应用
 web/                页面、样式、前端逻辑
 docs/               逐列工作流和草书规则
+AGENTS.md           给编程代理的逐步说明
 examples/demo/      合成示例图、释文、示例框
 config.example.json 开箱即用的示例配置
 ```
@@ -217,7 +260,20 @@ python serve.py
 python crop_glyphs.py
 ```
 
-Python 3.10+ is enough to serve the UI (stdlib only). Pillow is required to crop glyphs, draw contact sheets, and regenerate the demo plates. If `config.json` is absent, `config.example.json` is used, so a fresh clone runs against the synthetic plates under `examples/demo/`. The first launch seeds `boxes.json` from `boxes.example.json` when that file sits beside it. Copy `config.example.json` to `config.json` to point at your own images. See the Chinese sections above for config fields, the HTTP API, and keyboard shortcuts. [docs/WORKFLOW.md](docs/WORKFLOW.md) and [docs/CURSIVE_RULES.md](docs/CURSIVE_RULES.md) record the per-column alignment workflow learned on the cursive scroll *Shupu*.
+To drive the same steps from an agent, use `python -m cba` or the `cba` console script (status, export-column, apply-spec, contact-sheet, validate, serve). The agent supplies its own vision; this repo never calls a model API. The workflow, spec format, and the rule against rewriting human-approved boxes are in [AGENTS.md](AGENTS.md).
+
+Install it with uv, then run it from any directory. Writes go to the current directory or `--data-dir`, and the installed package is read-only:
+
+```bash
+uv tool install .
+uv tool install git+https://github.com/AsahiArt/calligraphy-box-annotator
+uvx --from git+https://github.com/AsahiArt/calligraphy-box-annotator cba status --json
+cba serve --data-dir ./data --port 8765
+```
+
+`python -m cba` still works from a source checkout and from any environment where the package is installed. `cba serve` launches the same annotator as `python serve.py`.
+
+Python 3.9+ is enough to serve the UI (stdlib only). Pillow is required to crop glyphs, draw contact sheets, and regenerate the demo plates. In a source checkout, if `config.json` is absent, `config.example.json` is used, so a fresh clone runs against the synthetic plates under `examples/demo/`. The first launch seeds `boxes.json` from `boxes.example.json` when that file sits beside the configured boxes path, or from the copy bundled in the installed package. Copy `config.example.json` to `config.json` to point at your own images. See the Chinese sections above for config fields, the HTTP API, and keyboard shortcuts. [docs/WORKFLOW.md](docs/WORKFLOW.md) and [docs/CURSIVE_RULES.md](docs/CURSIVE_RULES.md) record the per-column alignment workflow learned on the cursive scroll *Shupu*.
 
 This repository does not include museum or other copyrighted calligraphy images. You must supply images you have the rights to use. The code is MIT licensed.
 

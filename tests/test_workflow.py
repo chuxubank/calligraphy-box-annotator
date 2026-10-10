@@ -296,7 +296,7 @@ class ManualLabelTests(EnvGuard):
                     "textOffsetByPlate": {"plate-01": 0},
                     "plates": {
                         "plate-01": [
-                            {"id": 1, "x": 0, "y": 0, "w": 8, "h": 8, "char": "丁", "col": 1, "ti": 3},
+                            {"id": 1, "x": 0, "y": 0, "w": 8, "h": 8, "char": "丁", "col": 1, "ti": 3, "approved": True},
                             {"id": 2, "x": 0, "y": 10, "w": 8, "h": 8, "char": "甲", "col": 1, "ti": 0, "repeatMark": True},
                         ]
                     },
@@ -317,6 +317,8 @@ class ManualLabelTests(EnvGuard):
                 by_id = {box["id"]: box for box in loaded["plates"]["plate-01"]}
                 self.assertEqual(by_id[1]["char"], "丁")
                 self.assertEqual(by_id[1]["ti"], 3)
+                self.assertTrue(by_id[1]["approved"])
+                self.assertNotIn("approved", by_id[2])
                 self.assertEqual(by_id[2]["char"], "甲")
                 self.assertEqual(by_id[2]["ti"], 0)
                 self.assertTrue(by_id[2]["repeatMark"])

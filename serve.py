@@ -12,7 +12,8 @@ from pathlib import Path
 from urllib.parse import unquote
 
 from boxannotator import (
-    ROOT,
+    add_common_arguments,
+    demo_dir,
     discover_plates,
     empty_boxes,
     load_boxes,
@@ -20,10 +21,10 @@ from boxannotator import (
     load_text_chars,
     normalize_boxes,
     save_boxes,
-    add_common_arguments,
+    web_dir,
 )
 
-WEB_ROOT = ROOT / "web"
+WEB_ROOT = web_dir()
 STATIC_FILES = {"index.html", "app.js", "style.css"}
 MAX_BODY = 20 * 1024 * 1024
 _SAVE_LOCK = threading.Lock()
@@ -150,20 +151,29 @@ class Server(ThreadingHTTPServer):
     daemon_threads = True
 
 
+def _example_box_files(settings) -> list[Path]:
+    sibling = settings.boxes_path.with_name("boxes.example.json")
+    bundled = demo_dir() / "boxes.example.json"
+    found: list[Path] = []
+    for path in (sibling, bundled):
+        if path.is_file() and path not in found:
+            found.append(path)
+    return found
+
+
 def ensure_boxes_file(settings) -> None:
     if settings.boxes_path.exists():
         return
     plate_ids = [plate_id for plate_id, _ in discover_plates(settings.plates_dir, settings.plate_glob)]
-    example = settings.boxes_path.with_name("boxes.example.json")
-    if example.is_file():
+    for example in _example_box_files(settings):
         try:
             raw = json.loads(example.read_text(encoding="utf-8-sig"))
         except (OSError, json.JSONDecodeError) as exc:
             print(f"warning: cannot read {example}: {exc}")
-        else:
-            save_boxes(settings.boxes_path, normalize_boxes(raw, plate_ids, settings.source))
-            print(f"seeded boxes from {example.name}")
-            return
+            continue
+        save_boxes(settings.boxes_path, normalize_boxes(raw, plate_ids, settings.source))
+        print(f"seeded boxes from {example.name}")
+        return
     save_boxes(settings.boxes_path, empty_boxes(plate_ids, settings.source))
 
 

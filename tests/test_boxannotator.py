@@ -29,6 +29,7 @@ from serve import Server, build_handler  # noqa: E402
 
 CBA_ENV = (
     "CBA_CONFIG",
+    "CBA_DATA_DIR",
     "CBA_HOST",
     "CBA_PORT",
     "CBA_PLATES_DIR",
@@ -51,6 +52,7 @@ def ns(**kwargs) -> argparse.Namespace:
         "port": None,
         "crop_out": None,
         "source": None,
+        "data_dir": None,
     }
     base.update(kwargs)
     return argparse.Namespace(**base)
