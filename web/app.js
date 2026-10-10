@@ -153,10 +153,12 @@
     const b = selectedBox();
     const charInput = document.getElementById("boxCharInput");
     const tiInput = document.getElementById("boxTiInput");
-    if (charInput && document.activeElement !== charInput) {
+    // A toolbar click fires mouseup before the button's click handler. Do not
+    // copy the box back over a value the user, or 邻框补序号, just put in the field.
+    if (charInput && document.activeElement !== charInput && state.labelField !== "char") {
       charInput.value = b && b.char ? b.char : "";
     }
-    if (tiInput && document.activeElement !== tiInput) {
+    if (tiInput && document.activeElement !== tiInput && state.labelField !== "ti") {
       tiInput.value = b && typeof b.ti === "number" && isFinite(b.ti) ? String(Math.round(b.ti)) : "";
     }
     syncTiPreview();
@@ -531,7 +533,8 @@
     else if (hitTest(img.x, img.y)) els.canvas.style.cursor = "move";
     else els.canvas.style.cursor = "crosshair";
   }
-  function onPointerUp() {
+  function onPointerUp(e) {
+    const gesture = state.mode === "draw" || state.mode === "move" || state.mode === "resize" || state.mode === "pan";
     if (state.mode === "draw" && state.draft) {
       const d = clampBox(state.draft);
       if (d.w >= MIN_BOX && d.h >= MIN_BOX) {
