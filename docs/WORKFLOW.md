@@ -101,11 +101,20 @@ spec 的形状：
 | 把一层手改写回 boxes.json，并留备份 | `python tools/apply_column_spec.py` |
 | 代理入口：进度、导出一列、应用 spec、对照表、校验、断点 | `python -m cba`（见 [AGENTS.md](../AGENTS.md)） |
 | 裁单字图（默认跳过不制卡，重文点文件名带 `_repeat`） | `python crop_glyphs.py` |
+| 导出 Anki 牌组（一字一卡，跳过重文点和不制卡） | `python -m cba anki` |
 
 领域上的取舍（改字点、重文点、侧写小字、补纸）见 [CURSIVE_RULES.md](CURSIVE_RULES.md)。
 
+## 导出牌组
+
+列都看完、`validate` 没有还要改的问题之后，再打成牌组。`python -m cba anki` 读当前的 `boxes.json` 和图版，不改框。一个字一张笔记。字段是字、字形图、全部写法和 `图版·ti`；卡片长什么样由 `cba/anki_templates/default/` 或 `--template-dir` 决定。重文点和不制卡的框不进去。图是牌组里的 JPEG 媒体文件。`--deck-name` 和模板集 `id` 不变时，再次导入会更新原来的笔记。
+
+```bash
+python -m cba anki --deck-name 书谱 --out deck.apkg --json
+```
+
 ## English
 
-`python -m cba` is the agent entry point: status, export one column, apply a spec, contact sheet, validate, and resume. Columns a person has marked `approved` are not rewritten. See [AGENTS.md](../AGENTS.md).
+`python -m cba` is the agent entry point: status, export one column, apply a spec, contact sheet, validate, and resume. Columns a person has marked `approved` are not rewritten. The last step is `cba anki`, one note per character. See [AGENTS.md](../AGENTS.md).
 
 Per-column alignment replaced a single running text offset per plate: one missed box no longer shifts every later label. A new box is labeled on its own — type a character, or a transcription index whose character is previewed beside the field — and the rest of the plate stays put. When the box is the only one between neighbours whose indexes leave exactly one gap, the tool can suggest that index. Relabeling the whole plate asks for confirmation in fixed mode, because it overwrites the per-column alignment. Cut each column into exactly N boxes on ink gaps, centre the whole column on its ink, then nudge each box by at most about ±15% of its width. Review with contact sheets (original-colour crop, printed label, grey transcription index, red border on low-confidence columns). Record manual fixes as specs and re-run them in order, each step backing up `boxes.json`. A visual pass checks every column; only undecidable columns go to a person. The worked example is the cursive scroll *Shupu* (书谱); this repository still ships only synthetic demo plates.

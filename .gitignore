@@ -12,6 +12,7 @@ venv/
 boxes.json
 cropped/
 sheets/
+*.apkg
 *.pre_*
 *.review.json
 review/

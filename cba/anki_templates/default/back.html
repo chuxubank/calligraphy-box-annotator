@@ -1,0 +1,100 @@
+<div class="leaf back" lang="zh">
+  <div class="reprise">
+    <div class="front-single">
+      <div class="han printed solo">{{Char}}</div>
+    </div>
+  </div>
+  <div class="gallery multi">
+    <div class="variant-srcs">{{Sources}}</div>
+    {{Variants}}
+  </div>
+  <span class="count" hidden>{{Count}}</span>
+</div>
+
+<script>
+(function(){
+  function measure(){
+    var vv = window.visualViewport;
+    var h = 0;
+    if (vv && vv.height) h = vv.height;
+    if (window.innerHeight > h) h = window.innerHeight;
+    var ch = document.documentElement && document.documentElement.clientHeight;
+    if (ch > h) h = ch;
+    var sh = (window.screen && (window.screen.availHeight || window.screen.height)) || 0;
+    if (sh && h < sh * 0.58) h = Math.round(sh * 0.70);
+    return Math.round(h);
+  }
+  function fit(){
+    var h = measure();
+    if (!h) return;
+    var px = h + "px";
+    var root = document.documentElement;
+    root.style.setProperty("--pane", px);
+    root.style.height = root.style.minHeight = root.style.maxHeight = px;
+    [document.body, document.getElementById("qa"), document.querySelector(".card")].forEach(function(el){
+      if (!el) return;
+      el.style.height = el.style.minHeight = el.style.maxHeight = px;
+      el.style.overflow = "hidden";
+      el.style.background = getComputedStyle(root).getPropertyValue("--paper") || "#f4ecd8";
+    });
+  }
+  function pairVariants(){
+    var gallery = document.querySelector(".gallery.multi");
+    if (!gallery) return;
+    var srcNode = gallery.querySelector(".variant-srcs");
+    var lines = srcNode
+      ? srcNode.textContent.split("\n").map(function(line){ return line.trim(); }).filter(Boolean)
+      : [];
+    if (srcNode) srcNode.remove();
+    var imgs = Array.prototype.slice.call(gallery.querySelectorAll("img"));
+    if (!imgs.length) {
+      var fallback = document.createElement("div");
+      fallback.className = "fallback";
+      var han = document.createElement("div");
+      han.className = "han cursive";
+      var printed = document.querySelector(".han.printed");
+      han.textContent = printed ? printed.textContent : "";
+      fallback.appendChild(han);
+      gallery.appendChild(fallback);
+      return;
+    }
+    imgs.forEach(function(img, index){
+      var figure = document.createElement("figure");
+      figure.className = "slot";
+      var caption = document.createElement("figcaption");
+      caption.textContent = lines[index] || "";
+      img.parentNode.insertBefore(figure, img);
+      figure.appendChild(img);
+      figure.appendChild(caption);
+    });
+  }
+  function hideBroken(){
+    document.querySelectorAll(".slot img").forEach(function(img){
+      img.addEventListener("error", function(){
+        var slot = img.closest(".slot");
+        if (slot) slot.style.display = "none";
+      });
+    });
+  }
+  fit();
+  pairVariants();
+  hideBroken();
+  if (document.readyState === "loading") {
+    document.addEventListener("DOMContentLoaded", function(){ fit(); hideBroken(); });
+  }
+  window.addEventListener("resize", fit);
+  window.addEventListener("orientationchange", function(){
+    setTimeout(fit, 80);
+    setTimeout(fit, 300);
+  });
+  var vv = window.visualViewport;
+  if (vv){
+    vv.addEventListener("resize", fit);
+    vv.addEventListener("scroll", fit);
+  }
+  setTimeout(fit, 0);
+  setTimeout(fit, 80);
+  setTimeout(fit, 240);
+  setTimeout(fit, 600);
+})();
+</script>

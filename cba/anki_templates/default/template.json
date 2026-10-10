@@ -1,0 +1,12 @@
+{
+  "id": "default",
+  "name": "cba glyphs",
+  "card": "Glyph",
+  "fields": ["Char", "Image", "Variants", "Sources", "Count"],
+  "fronts": {
+    "image": "front.html",
+    "char": "front-char.html"
+  },
+  "back": "back.html",
+  "css": "style.css"
+}

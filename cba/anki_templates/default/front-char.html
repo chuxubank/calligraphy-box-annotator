@@ -1,0 +1,51 @@
+<div class="leaf" lang="zh">
+  <div class="front-single">
+    <div class="han printed solo">{{Char}}</div>
+  </div>
+</div>
+
+<script>
+(function(){
+  function measure(){
+    var vv = window.visualViewport;
+    var h = 0;
+    if (vv && vv.height) h = vv.height;
+    if (window.innerHeight > h) h = window.innerHeight;
+    var ch = document.documentElement && document.documentElement.clientHeight;
+    if (ch > h) h = ch;
+    var sh = (window.screen && (window.screen.availHeight || window.screen.height)) || 0;
+    if (sh && h < sh * 0.58) h = Math.round(sh * 0.70);
+    return Math.round(h);
+  }
+  function fit(){
+    var h = measure();
+    if (!h) return;
+    var px = h + "px";
+    var root = document.documentElement;
+    root.style.setProperty("--pane", px);
+    root.style.height = root.style.minHeight = root.style.maxHeight = px;
+    [document.body, document.getElementById("qa"), document.querySelector(".card")].forEach(function(el){
+      if (!el) return;
+      el.style.height = el.style.minHeight = el.style.maxHeight = px;
+      el.style.overflow = "hidden";
+      el.style.background = getComputedStyle(root).getPropertyValue("--paper") || "#f4ecd8";
+    });
+  }
+  fit();
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", fit);
+  window.addEventListener("resize", fit);
+  window.addEventListener("orientationchange", function(){
+    setTimeout(fit, 80);
+    setTimeout(fit, 300);
+  });
+  var vv = window.visualViewport;
+  if (vv){
+    vv.addEventListener("resize", fit);
+    vv.addEventListener("scroll", fit);
+  }
+  setTimeout(fit, 0);
+  setTimeout(fit, 80);
+  setTimeout(fit, 240);
+  setTimeout(fit, 600);
+})();
+</script>
