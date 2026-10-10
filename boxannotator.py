@@ -361,6 +361,67 @@ def _as_int_field(value: object) -> int | None:
     return None
 
 
+def suggest_missing_ti(boxes: list[dict], target_id: int, thresh_ratio: float = 0.55) -> int | None:
+    """Suggest a transcription index for one box from its column neighbours.
+
+    Columns are clustered the same way as the annotator (right to left, using
+    each box's center and a threshold of ``thresh_ratio`` times the median
+    width). Within that column, if the nearest box above has ``ti == a``, the
+    nearest box below has ``ti == b``, exactly one index is missing
+    (``b == a + 2``), and the target is the only box between them, return
+    ``a + 1``. Otherwise return None.
+    """
+    for column in _cluster_columns(boxes, thresh_ratio):
+        ids = [box.get("id") for box in column]
+        if target_id not in ids:
+            continue
+        index = ids.index(target_id)
+        above_at: tuple[int, int] | None = None
+        for cursor in range(index - 1, -1, -1):
+            ti = _as_int_field(column[cursor].get("ti"))
+            if ti is not None:
+                above_at = (cursor, ti)
+                break
+        below_at: tuple[int, int] | None = None
+        for cursor in range(index + 1, len(column)):
+            ti = _as_int_field(column[cursor].get("ti"))
+            if ti is not None:
+                below_at = (cursor, ti)
+                break
+        if above_at is None or below_at is None:
+            return None
+        above_index, above_ti = above_at
+        below_index, below_ti = below_at
+        if below_ti - above_ti == 2 and below_index - above_index == 2:
+            return above_ti + 1
+        return None
+    return None
+
+
+def _cluster_columns(boxes: list[dict], thresh_ratio: float) -> list[list[dict]]:
+    if not boxes:
+        return []
+    widths = sorted(max(1.0, float(box["w"])) for box in boxes)
+    median_w = widths[len(widths) // 2]
+    thresh = thresh_ratio * median_w
+    items = sorted(boxes, key=lambda box: -(float(box["x"]) + float(box["w"]) / 2))
+    columns: list[dict] = []
+    for box in items:
+        center = float(box["x"]) + float(box["w"]) / 2
+        placed = False
+        for column in columns:
+            if abs(center - column["cx"]) < thresh:
+                column["boxes"].append(box)
+                count = len(column["boxes"])
+                column["cx"] = (column["cx"] * (count - 1) + center) / count
+                placed = True
+                break
+        if not placed:
+            columns.append({"cx": center, "boxes": [box]})
+    columns.sort(key=lambda column: -column["cx"])
+    return [sorted(column["boxes"], key=lambda box: float(box["y"])) for column in columns]
+
+
 def label_mode_of(data: object) -> str:
     if isinstance(data, dict) and data.get("labelMode") == "fixed":
         return "fixed"

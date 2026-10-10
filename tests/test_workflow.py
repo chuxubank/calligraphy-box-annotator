@@ -10,7 +10,13 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 import boxannotator  # noqa: E402
-from boxannotator import clean_box, crop_plates, load_settings, normalize_boxes  # noqa: E402
+from boxannotator import (  # noqa: E402
+    clean_box,
+    crop_plates,
+    load_settings,
+    normalize_boxes,
+    suggest_missing_ti,
+)
 from serve import ensure_boxes_file  # noqa: E402
 from tools.apply_column_spec import apply_spec  # noqa: E402
 from tools.column_cut import cut_image  # noqa: E402
@@ -216,6 +222,108 @@ class ColumnAndSheetTests(unittest.TestCase):
         self.assertTrue(column[1]["repeatMark"])
         self.assertEqual([box["char"] for box in updated["plates"]["plate-01"] if box["col"] == 2], ["戊"])
         self.assertEqual(updated["labelMode"], "fixed")
+
+
+def _box(box_id: int, x: int, y: int, ti: int | None = None, char: str = "") -> dict:
+    item = {"id": box_id, "x": x, "y": y, "w": 40, "h": 40}
+    if char:
+        item["char"] = char
+    if ti is not None:
+        item["ti"] = ti
+    return item
+
+
+class ManualLabelTests(EnvGuard):
+    def test_suggests_the_single_missing_index_between_neighbours(self) -> None:
+        boxes = [
+            _box(1, 200, 10, ti=0, char="甲"),
+            _box(2, 200, 80, char=""),
+            _box(3, 200, 150, ti=2, char="丙"),
+            _box(4, 20, 10, ti=4, char="戊"),
+        ]
+        self.assertEqual(suggest_missing_ti(boxes, 2), 1)
+        self.assertIsNone(suggest_missing_ti(boxes, 4))
+
+    def test_suggests_nothing_when_the_gap_is_not_exactly_one(self) -> None:
+        tight = [_box(1, 200, 10, ti=0), _box(2, 200, 80), _box(3, 200, 150, ti=1)]
+        wide = [_box(1, 200, 10, ti=0), _box(2, 200, 80), _box(3, 200, 150, ti=3)]
+        two_boxes = [
+            _box(1, 200, 10, ti=0),
+            _box(2, 200, 80),
+            _box(3, 200, 150),
+            _box(4, 200, 220, ti=2),
+        ]
+        only_above = [_box(1, 200, 10, ti=0), _box(2, 200, 80)]
+        self.assertIsNone(suggest_missing_ti(tight, 2))
+        self.assertIsNone(suggest_missing_ti(wide, 2))
+        self.assertIsNone(suggest_missing_ti(two_boxes, 2))
+        self.assertIsNone(suggest_missing_ti(two_boxes, 3))
+        self.assertIsNone(suggest_missing_ti(only_above, 2))
+
+    def test_server_keeps_a_manually_set_char_and_ti(self) -> None:
+        import tempfile
+        import threading
+        import urllib.request
+
+        from PIL import Image
+
+        from serve import Server, build_handler
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            plates = folder / "plates"
+            plates.mkdir()
+            Image.new("RGB", (20, 20), "white").save(plates / "plate-01.png")
+            (folder / "text.txt").write_text("甲乙丙丁\n", encoding="utf-8")
+            config = {
+                "host": "127.0.0.1",
+                "port": 9,
+                "plates_dir": "plates",
+                "boxes": "boxes.json",
+                "text": "text.txt",
+                "source": "manual",
+                "crop_out": "cropped",
+            }
+            (folder / "config.json").write_text(json.dumps(config), encoding="utf-8")
+            settings = load_settings(ns(config=str(folder / "config.json")))
+            httpd = Server(("127.0.0.1", 0), build_handler(settings))
+            thread = threading.Thread(target=httpd.serve_forever, daemon=True)
+            thread.start()
+            base = f"http://127.0.0.1:{httpd.server_address[1]}"
+            try:
+                posted = {
+                    "labelMode": "fixed",
+                    "textOffsetByPlate": {"plate-01": 0},
+                    "plates": {
+                        "plate-01": [
+                            {"id": 1, "x": 0, "y": 0, "w": 8, "h": 8, "char": "丁", "col": 1, "ti": 3},
+                            {"id": 2, "x": 0, "y": 10, "w": 8, "h": 8, "char": "甲", "col": 1, "ti": 0, "repeatMark": True},
+                        ]
+                    },
+                }
+                request = urllib.request.Request(
+                    base + "/api/boxes",
+                    data=json.dumps(posted).encode("utf-8"),
+                    headers={"Content-Type": "application/json"},
+                    method="POST",
+                )
+                with urllib.request.urlopen(request) as response:
+                    saved = json.loads(response.read().decode("utf-8"))
+                self.assertTrue(saved["ok"])
+                with urllib.request.urlopen(base + "/api/boxes") as response:
+                    loaded = json.loads(response.read().decode("utf-8"))
+                self.assertEqual(loaded["labelMode"], "fixed")
+                self.assertEqual(loaded["textOffsetByPlate"], {"plate-01": 0})
+                by_id = {box["id"]: box for box in loaded["plates"]["plate-01"]}
+                self.assertEqual(by_id[1]["char"], "丁")
+                self.assertEqual(by_id[1]["ti"], 3)
+                self.assertEqual(by_id[2]["char"], "甲")
+                self.assertEqual(by_id[2]["ti"], 0)
+                self.assertTrue(by_id[2]["repeatMark"])
+            finally:
+                httpd.shutdown()
+                httpd.server_close()
+                thread.join(timeout=5)
 
 
 if __name__ == "__main__":

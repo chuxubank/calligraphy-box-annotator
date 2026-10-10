@@ -22,6 +22,7 @@
     mode: "idle", drawStart: null, draft: null, moveOffset: null,
     resizeHandle: null, spaceDown: false, lastPointer: null,
     chars: [], textOffsetByPlate: {}, labelMode: "offset",
+    labelField: null, labelSyncId: null,
   };
   function plateId() { return state.plates[state.plateIndex] || null; }
   function boxes() {
@@ -47,8 +48,8 @@
     els.statMsg.textContent = text || "";
     els.statMsg.style.color = ok === false ? "#f08080" : "#7dcea0";
   }
-  /** Reading order: columns RTL (x descending clusters), within column top-to-bottom. */
-  function sortBoxesReadingOrder(list) {
+  /** Columns RTL by center, each column top-to-bottom. Same rule as suggest_missing_ti. */
+  function clusterColumns(list) {
     if (!list || !list.length) return [];
     const items = list.slice();
     const widths = items.map(function (b) { return Math.max(1, b.w); }).sort(function (a, b) { return a - b; });
@@ -73,14 +74,92 @@
       }
       if (!placed) columns.push({ cx: cx, boxes: [b] });
     }
-    // columns already roughly RTL from first-seen order; re-sort by column center desc
     columns.sort(function (a, b) { return b.cx - a.cx; });
-    const ordered = [];
     for (let c = 0; c < columns.length; c++) {
       columns[c].boxes.sort(function (a, b) { return a.y - b.y; });
+    }
+    return columns;
+  }
+  /** Reading order: columns RTL, within a column top-to-bottom. */
+  function sortBoxesReadingOrder(list) {
+    const columns = clusterColumns(list);
+    const ordered = [];
+    for (let c = 0; c < columns.length; c++) {
       for (let j = 0; j < columns[c].boxes.length; j++) ordered.push(columns[c].boxes[j]);
     }
     return ordered;
+  }
+  function columnIndexOf(box, list) {
+    const columns = clusterColumns(list);
+    for (let c = 0; c < columns.length; c++) {
+      if (columns[c].boxes.indexOf(box) >= 0) return columns[c].boxes;
+    }
+    return null;
+  }
+  /**
+   * If this box is the only one between neighbours whose ti values leave
+   * exactly one index unused, return that index. Same rule as
+   * boxannotator.suggest_missing_ti.
+   */
+  function suggestMissingTi(box, list) {
+    const column = columnIndexOf(box, list);
+    if (!column) return null;
+    const index = column.indexOf(box);
+    let aboveIndex = -1;
+    let aboveTi = null;
+    for (let j = index - 1; j >= 0; j--) {
+      if (typeof column[j].ti === "number" && isFinite(column[j].ti)) {
+        aboveIndex = j;
+        aboveTi = Math.round(column[j].ti);
+        break;
+      }
+    }
+    let belowIndex = -1;
+    let belowTi = null;
+    for (let j = index + 1; j < column.length; j++) {
+      if (typeof column[j].ti === "number" && isFinite(column[j].ti)) {
+        belowIndex = j;
+        belowTi = Math.round(column[j].ti);
+        break;
+      }
+    }
+    if (aboveTi == null || belowTi == null) return null;
+    if (belowTi - aboveTi === 2 && belowIndex - aboveIndex === 2) return aboveTi + 1;
+    return null;
+  }
+  function isCjkChar(text) {
+    return typeof text === "string" && text.length === 1 && text >= "\u4e00" && text <= "\u9fff";
+  }
+  function parseIndex(text) {
+    const raw = String(text || "").trim();
+    if (!raw) return null;
+    if (!/^-?\d+$/.test(raw)) return NaN;
+    return parseInt(raw, 10);
+  }
+  function syncTiPreview() {
+    const el = document.getElementById("tiPreview");
+    const input = document.getElementById("boxTiInput");
+    if (!el || !input) return;
+    const ti = parseIndex(input.value);
+    if (ti == null) { el.textContent = ""; return; }
+    if (typeof ti !== "number" || ti < 0 || ti >= state.chars.length) { el.textContent = "—"; return; }
+    el.textContent = state.chars[ti];
+  }
+  function syncLabelInputs() {
+    if (state.selectedId !== state.labelSyncId) {
+      state.labelField = null;
+      state.labelSyncId = state.selectedId;
+    }
+    const b = selectedBox();
+    const charInput = document.getElementById("boxCharInput");
+    const tiInput = document.getElementById("boxTiInput");
+    if (charInput && document.activeElement !== charInput) {
+      charInput.value = b && b.char ? b.char : "";
+    }
+    if (tiInput && document.activeElement !== tiInput) {
+      tiInput.value = b && typeof b.ti === "number" && isFinite(b.ti) ? String(Math.round(b.ti)) : "";
+    }
+    syncTiPreview();
   }
   function assignCharsForPlate(pid, force) {
     // labelMode "fixed": labels were aligned per column. Moving a box must not
@@ -176,6 +255,7 @@
       els.textOffsetInput.value = String(start);
       els.textOffsetInput.max = String(Math.max(0, total));
     }
+    syncLabelInputs();
   }
   function fitZoom() {
     if (!state.image) return;
@@ -501,12 +581,62 @@
   function relabelCurrent() {
     const id = plateId();
     if (!id) return;
+    if (state.labelMode === "fixed") {
+      const ok = confirm("固定模式下重贴标签会按释文起点覆盖本张全部框的字，逐列对齐会被改掉。继续覆盖？");
+      if (!ok) { msg("已取消重贴"); return; }
+    }
     pushHistory();
     setTextOffset(els.textOffsetInput ? els.textOffsetInput.value : getTextOffset());
     assignCharsCurrent(true);
     state.dirty = true;
     updateStatus(); draw();
     msg((state.labelMode === "fixed" ? "已按起点覆盖固定标签 · 起点 " : "已重贴标签 · 起点 ") + getTextOffset());
+  }
+  function applyLabelToSelected() {
+    const b = selectedBox();
+    if (!b) { msg("未选中框", false); return; }
+    const tiInput = document.getElementById("boxTiInput");
+    const charInput = document.getElementById("boxCharInput");
+    const tiParsed = parseIndex(tiInput ? tiInput.value : "");
+    const charText = charInput ? charInput.value.trim() : "";
+    if (charText && !isCjkChar(charText)) { msg("字需要是一个汉字", false); return; }
+    const tiReady = typeof tiParsed === "number" && !isNaN(tiParsed);
+    const useTi = state.labelField === "ti" || (state.labelField !== "char" && tiReady);
+    if (useTi) {
+      if (tiParsed == null || isNaN(tiParsed)) { msg("先填写释文序号", false); return; }
+      if (tiParsed < 0 || tiParsed >= state.chars.length) {
+        msg("序号超出释文（0–" + Math.max(0, state.chars.length - 1) + "）", false);
+        return;
+      }
+      pushHistory();
+      b.ti = tiParsed;
+      b.char = state.chars[tiParsed];
+    } else if (charText) {
+      pushHistory();
+      b.char = charText;
+    } else {
+      msg("填写一个字，或填写释文序号", false);
+      return;
+    }
+    state.labelField = null;
+    state.dirty = true;
+    updateStatus();
+    draw();
+    const tiNote = typeof b.ti === "number" ? (" · 序号 " + b.ti) : "";
+    const modeNote = state.labelMode === "offset" ? "（跟随起点时，保存仍会按起点重贴）" : "";
+    msg("已贴到 #" + b.id + " · " + b.char + tiNote + modeNote);
+  }
+  function suggestTiForSelected() {
+    const b = selectedBox();
+    if (!b) { msg("未选中框", false); return; }
+    const ti = suggestMissingTi(b, boxes());
+    const input = document.getElementById("boxTiInput");
+    if (ti == null) { msg("邻框没有正好空出一位", false); return; }
+    if (input) input.value = String(ti);
+    state.labelField = "ti";
+    syncTiPreview();
+    const ch = ti >= 0 && ti < state.chars.length ? state.chars[ti] : "";
+    msg("建议序号 " + ti + (ch ? (" · " + ch) : "") + "，按 L 或「贴到选中」写入");
   }
   function toggleRepeat() {
     const b = selectedBox();
@@ -676,6 +806,27 @@
     document.getElementById("btnZoomOut").onclick = function () { zoomAt(1 / 1.15); };
     document.getElementById("btnZoomReset").onclick = function () { fitZoom(); updateStatus(); draw(); };
     document.getElementById("btnRelabel").onclick = relabelCurrent;
+    const labelBtn = document.getElementById("btnLabelBox");
+    const suggestBtn = document.getElementById("btnSuggestTi");
+    const charInput = document.getElementById("boxCharInput");
+    const tiInput = document.getElementById("boxTiInput");
+    if (labelBtn) labelBtn.onclick = applyLabelToSelected;
+    if (suggestBtn) suggestBtn.onclick = suggestTiForSelected;
+    if (charInput) {
+      charInput.addEventListener("input", function () { state.labelField = "char"; });
+      charInput.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); applyLabelToSelected(); }
+      });
+    }
+    if (tiInput) {
+      tiInput.addEventListener("input", function () {
+        state.labelField = "ti";
+        syncTiPreview();
+      });
+      tiInput.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); applyLabelToSelected(); }
+      });
+    }
     const repeatBtn = document.getElementById("btnRepeat");
     const noCardBtn = document.getElementById("btnNoCard");
     const modeSel = document.getElementById("labelMode");
@@ -735,6 +886,8 @@
         e.preventDefault(); loadPlate(state.plateIndex - 1);
       } else if (!e.ctrlKey && !e.metaKey && e.key.toLowerCase() === "s") {
         e.preventDefault(); saveBoxes();
+      } else if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "l") {
+        e.preventDefault(); applyLabelToSelected();
       }
     });
     window.addEventListener("keyup", function (e) {

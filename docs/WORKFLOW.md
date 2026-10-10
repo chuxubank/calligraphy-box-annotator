@@ -10,7 +10,9 @@
 
 - 每一列自己对应释文里的一段 `[t0, t1)`。框上的 `ti` 是这段里的序号，`col` 是列号（阅读顺序，1 是最右一列）。
 - 漏一个框只影响这一列。下一列的起点还在原来的 `ti` 上。
-- 标注工具用 `labelMode: "fixed"`。加载、保存、移动、缩放都**不会**按图版起点重算标签。只有明确点「重贴标签」才覆盖。
+- 标注工具用 `labelMode: "fixed"`。加载、保存、移动、缩放都**不会**按图版起点重算标签。
+- 漏画的框单独贴：选中后填一个字，或填 `ti`（输入框旁预览释文里的那个字），按 `L` 或「贴到选中」。其他框不动。同一列上下两个框的 `ti` 正好空出一位、中间只有这一个框时，「邻框补序号」会建议这个空位。
+- 「重贴标签」在固定模式下会先确认。确认之后仍按整张起点覆盖，逐列对齐会被改掉。补一个框不要走这一步。
 - `textOffsetByPlate` 可以留着当参考，固定模式下工具会忽略它。
 
 ## 一列切成正好 N 个框
@@ -91,7 +93,7 @@ spec 的形状：
 
 | 步骤 | 工具 |
 | --- | --- |
-| 浏览、改框、固定标签、标重文点 / 不制卡 | `python serve.py` |
+| 浏览、改框、固定标签、给选中框单独贴字、标重文点 / 不制卡 | `python serve.py` |
 | 按墨迹把每列切成 N 框并整列居中 | `python tools/column_cut.py` |
 | 对照表 | `python tools/contact_sheet.py` |
 | 把一层手改写回 boxes.json，并留备份 | `python tools/apply_column_spec.py` |
@@ -101,4 +103,4 @@ spec 的形状：
 
 ## English
 
-Per-column alignment replaced a single running text offset per plate: one missed box no longer shifts every later label. Cut each column into exactly N boxes on ink gaps, centre the whole column on its ink, then nudge each box by at most about ±15% of its width. Review with contact sheets (original-colour crop, printed label, grey transcription index, red border on low-confidence columns). Record manual fixes as specs and re-run them in order, each step backing up `boxes.json`. A visual pass checks every column; only undecidable columns go to a person. The worked example is the cursive scroll *Shupu* (书谱); this repository still ships only synthetic demo plates.
+Per-column alignment replaced a single running text offset per plate: one missed box no longer shifts every later label. A new box is labeled on its own — type a character, or a transcription index whose character is previewed beside the field — and the rest of the plate stays put. When the box is the only one between neighbours whose indexes leave exactly one gap, the tool can suggest that index. Relabeling the whole plate asks for confirmation in fixed mode, because it overwrites the per-column alignment. Cut each column into exactly N boxes on ink gaps, centre the whole column on its ink, then nudge each box by at most about ±15% of its width. Review with contact sheets (original-colour crop, printed label, grey transcription index, red border on low-confidence columns). Record manual fixes as specs and re-run them in order, each step backing up `boxes.json`. A visual pass checks every column; only undecidable columns go to a person. The worked example is the cursive scroll *Shupu* (书谱); this repository still ships only synthetic demo plates.
