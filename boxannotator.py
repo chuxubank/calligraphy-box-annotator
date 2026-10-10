@@ -1,8 +1,11 @@
 """Config, plate discovery, boxes.json, and glyph cropping.
 
 Paths in a config file are resolved relative to that file. Relative CLI flags
-and environment variables are resolved relative to the current working directory.
-Built-in defaults are resolved relative to the repository root.
+and environment variables are resolved relative to ``--data-dir`` (or the
+current directory when that flag is omitted). A source checkout still reads
+``config.example.json`` from the repo. An installed copy reads the bundled
+demo and writes ``boxes.json``, crops, and review state only under the data
+directory, never inside the package.
 """
 
 from __future__ import annotations
@@ -16,6 +19,52 @@ from dataclasses import dataclass
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
+
+
+def source_checkout() -> bool:
+    """True when this file is the repo, not a copy installed into site-packages."""
+    return (ROOT / "pyproject.toml").is_file() and (ROOT / "boxannotator.py").is_file()
+
+
+def demo_dir() -> Path:
+    """Read-only synthetic demo shipped with the repo or the installed package."""
+    checkout = ROOT / "examples" / "demo"
+    if (checkout / "plates").is_dir() and (checkout / "transcription.txt").is_file():
+        return checkout
+    packaged = ROOT / "cba" / "demo"
+    if (packaged / "plates").is_dir():
+        return packaged
+    return checkout
+
+
+def web_dir() -> Path:
+    """Static annotator UI, from the checkout or from package data."""
+    checkout = ROOT / "web"
+    if (checkout / "index.html").is_file():
+        return checkout
+    packaged = ROOT / "cba" / "web"
+    if (packaged / "index.html").is_file():
+        return packaged
+    return checkout
+
+
+def explicit_data_dir(args: argparse.Namespace | None = None) -> bool:
+    if args is not None and getattr(args, "data_dir", None) not in (None, ""):
+        return True
+    return os.environ.get("CBA_DATA_DIR") not in (None, "")
+
+
+def ensure_outside_package(path: Path) -> None:
+    """Refuse writes that would land inside an installed copy of this package."""
+    if source_checkout():
+        return
+    resolved = path.resolve()
+    try:
+        resolved.relative_to(ROOT.resolve())
+    except ValueError:
+        return
+    die(f"refusing to write inside the installed package: {resolved}")
+
 
 CJK_RE = re.compile(r"[\u4e00-\u9fff]")
 IMAGE_SUFFIXES = {".jpg", ".jpeg", ".png"}
@@ -114,6 +163,43 @@ def _resolve_path(value: object, base: Path, label: str) -> Path:
     return path.resolve()
 
 
+def resolve_data_dir(args: argparse.Namespace | None = None) -> Path:
+    """Directory for writable files: ``--data-dir``, ``CBA_DATA_DIR``, or the cwd."""
+    chosen = None
+    if args is not None and getattr(args, "data_dir", None) not in (None, ""):
+        chosen = getattr(args, "data_dir")
+    elif os.environ.get("CBA_DATA_DIR") not in (None, ""):
+        chosen = os.environ.get("CBA_DATA_DIR")
+    if chosen is None:
+        return Path.cwd().resolve()
+    return _resolve_path(chosen, Path.cwd(), "data_dir")
+
+
+def _installed_defaults(data_dir: Path) -> dict:
+    """Read the bundled demo if the data dir has no plates; write only under ``data_dir``."""
+    demo = demo_dir()
+    user_plates = data_dir / "plates"
+    if user_plates.is_dir():
+        plates = str(user_plates.resolve())
+        plate_glob = ""
+    else:
+        plates = str((demo / "plates").resolve())
+        plate_glob = "*.png"
+    user_text = data_dir / "transcription.txt"
+    text = user_text.resolve() if user_text.is_file() else (demo / "transcription.txt").resolve()
+    return {
+        "host": DEFAULTS["host"],
+        "port": DEFAULTS["port"],
+        "plates_dir": plates,
+        "boxes": str((data_dir / "boxes.json").resolve()),
+        "text": str(text),
+        "plate_glob": plate_glob,
+        "source": DEFAULTS["source"],
+        "crop_out": str((data_dir / "cropped").resolve()),
+        "cjk_font": "",
+    }
+
+
 def _as_port(value: object) -> int:
     try:
         port = int(value)
@@ -133,13 +219,19 @@ def _as_source(value: object) -> str:
     return text
 
 
-def _pick(key: str, data: dict, args: argparse.Namespace | None, config_base: Path):
+def _pick(
+    key: str,
+    data: dict,
+    args: argparse.Namespace | None,
+    config_base: Path,
+    cli_base: Path,
+):
     cli_value = getattr(args, key, None) if args is not None else None
     if cli_value is not None and cli_value != "":
-        return cli_value, Path.cwd().resolve()
+        return cli_value, cli_base
     env_value = os.environ.get(ENV_KEYS[key])
     if env_value not in (None, ""):
-        return env_value, Path.cwd().resolve()
+        return env_value, cli_base
     if key in data and data[key] not in (None, ""):
         return data[key], config_base
     return DEFAULTS[key], ROOT
@@ -147,18 +239,20 @@ def _pick(key: str, data: dict, args: argparse.Namespace | None, config_base: Pa
 
 def load_settings(args: argparse.Namespace | None = None) -> Settings:
     """CLI flags override environment variables, which override the config file."""
+    data_dir = resolve_data_dir(args)
     config_arg = getattr(args, "config", None) if args is not None else None
     env_config = os.environ.get("CBA_CONFIG")
     config_path: Path | None = None
     data: dict = {}
-    config_base = ROOT
+    config_base = data_dir
+    cli_base = data_dir
 
     chosen = config_arg or env_config
     if chosen:
-        config_path = _resolve_path(chosen, Path.cwd(), "config")
+        config_path = _resolve_path(chosen, data_dir, "config")
         data = read_config_file(config_path)
         config_base = config_path.parent
-    else:
+    elif source_checkout() and not explicit_data_dir(args):
         local = ROOT / "config.json"
         example = ROOT / "config.example.json"
         if local.is_file():
@@ -169,11 +263,18 @@ def load_settings(args: argparse.Namespace | None = None) -> Settings:
             config_path = example
             data = read_config_file(example)
             config_base = example.parent
+    elif (data_dir / "config.json").is_file():
+        config_path = data_dir / "config.json"
+        data = read_config_file(config_path)
+        config_base = config_path.parent
+    else:
+        data = _installed_defaults(data_dir)
+        config_base = data_dir
 
     values: dict[str, object] = {}
     bases: dict[str, Path] = {}
     for key in DEFAULTS:
-        values[key], bases[key] = _pick(key, data, args, config_base)
+        values[key], bases[key] = _pick(key, data, args, config_base, cli_base)
 
     glob = values["plate_glob"]
     plate_glob = glob.strip() if isinstance(glob, str) and glob.strip() else None
@@ -218,8 +319,13 @@ def find_cjk_font(explicit: Path | None = None) -> str:
 
 def add_common_arguments(parser: argparse.ArgumentParser, *, crop: bool = False) -> None:
     parser.add_argument(
+        "--data-dir",
+        dest="data_dir",
+        help="directory for boxes.json, crops, and review state (default: current directory)",
+    )
+    parser.add_argument(
         "--config",
-        help="config JSON (default: ./config.json if it exists, otherwise config.example.json)",
+        help="config JSON (default: config.json in the data directory, or config.example.json in a source checkout)",
     )
     parser.add_argument("--plates-dir", dest="plates_dir", help="directory of plate images")
     parser.add_argument("--boxes", help="path to boxes.json")
@@ -488,6 +594,7 @@ def load_boxes(path: Path, plate_ids: list[str], source: str) -> dict:
 
 
 def save_boxes(path: Path, data: dict) -> None:
+    ensure_outside_package(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = json.dumps(data, ensure_ascii=False, indent=2) + "\n"
     tmp = path.with_suffix(path.suffix + ".tmp")
@@ -564,6 +671,7 @@ def crop_plates(
     plate_ids = [plate_id for plate_id, _ in pairs]
     document = boxes if boxes is not None else load_boxes(settings.boxes_path, plate_ids, settings.source)
     out_dir = settings.crop_out.resolve()
+    ensure_outside_package(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
     written: list[Path] = []

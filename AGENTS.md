@@ -6,7 +6,7 @@
 
 ## 循环
 
-1. **准备。** `python -m pip install -r requirements.txt`。没有 `config.json` 时用 `config.example.json`，图在 `examples/demo/plates/`，释文在 `examples/demo/transcription.txt`。`boxes.json` 不存在时，只读命令会改读旁边的 `boxes.example.json`。
+1. **准备。** 在仓库里：`python -m pip install -r requirements.txt`，然后用 `python -m cba`。也可以装成命令：`uv tool install .`，之后在任意目录运行 `cba`。不克隆仓库时：`uv tool install git+https://github.com/AsahiArt/calligraphy-box-annotator`，或临时执行 `uvx --from git+https://github.com/AsahiArt/calligraphy-box-annotator cba status --json`。装好的命令把 `boxes.json`、`review/`、`sheets/` 写到当前目录或 `--data-dir`，示例图从安装包只读读取，不要往安装包里写文件。源码检出且没有指定数据目录时，没有 `config.json` 则用 `config.example.json`，图在 `examples/demo/plates/`，释文在 `examples/demo/transcription.txt`。`boxes.json` 不存在时，只读命令会改读旁边的 `boxes.example.json`（安装包里则改读打包的示例）。
 2. **看进度。** `python -m cba status --json`。只处理 `unreviewed`。`approved` 为真的列跳过，不要写进 spec。
 3. **要几何提案时再切列。** `python -m cba cut --plate plate-01 --per-column 4 --json`（等同 `python tools/column_cut.py`）。这一步**不写** `boxes.json`。把 spans 抄进 spec，并填上正确的 `t0`，再用 `apply-spec` 落盘。
 4. **导出一列。** `python -m cba export-column --plate <图版> --col <列号> --json`。打开 JSON 里的 `image`（带编号的框，编号自上而下从 1 起），并读 `text`（这一列的释文切片，行序与编号一致）。
@@ -24,7 +24,7 @@
 
 ## 命令
 
-全部接受 `--json`（结果是 stdout 上的一个 JSON 对象）、`--boxes`、`--plates-dir`、`--text`、`--plate-glob`、`--config`。失败时退出码非 0。没有交互提示。
+全部接受 `--json`（结果是 stdout 上的一个 JSON 对象）、`--data-dir`、`--boxes`、`--plates-dir`、`--text`、`--plate-glob`、`--config`。失败时退出码非 0。没有交互提示。相对路径相对于 `--data-dir`（或 `CBA_DATA_DIR`），没指定时就是当前目录。
 
 | 命令 | 作用 |
 | --- | --- |
@@ -35,6 +35,7 @@
 | `validate` | 检查 `boxes.json`。有问题则退出码为 1 |
 | `review --plate ID --col N --reviewed\|--unresolved\|--clear` | 写审阅 sidecar。`--unresolved` 必须带 `--note`。不会改 `approved` |
 | `cut --plate ID --per-column N` | 按墨迹提议框，不落盘 |
+| `serve --data-dir 目录 --port 端口` | 打开标注网页。`boxes.json` 写在数据目录，不写进安装包 |
 
 `validate` 的 `issues[].code`：
 
@@ -117,4 +118,4 @@
 
 ## English
 
-Run `python -m cba` from the repo root. The agent uses its own vision on `export-column` PNGs; this repo makes no model calls and needs no API key. Loop: `status` → export each unreviewed column → compare with `docs/CURSIVE_RULES.md` → write a spec → `apply-spec` → export again → `review --reviewed`, or `review --unresolved --note` when the column cannot be decided. `approved` columns and boxes are never rewritten (`apply-spec` exits non-zero and leaves the file unchanged). Resume from `boxes.review.json` via `status`. Demo plates are synthetic; do not add museum images.
+Run `python -m cba` from the repo root, or install the `cba` command with `uv tool install .` / `uv tool install git+https://github.com/AsahiArt/calligraphy-box-annotator`. A one-off run is `uvx --from git+https://github.com/AsahiArt/calligraphy-box-annotator cba`. The agent uses its own vision on `export-column` PNGs; this repo makes no model calls and needs no API key. Loop: `status` → export each unreviewed column → compare with `docs/CURSIVE_RULES.md` → write a spec → `apply-spec` → export again → `review --reviewed`, or `review --unresolved --note` when the column cannot be decided. `approved` columns and boxes are never rewritten (`apply-spec` exits non-zero and leaves the file unchanged). Resume from `boxes.review.json` via `status`. `cba serve --data-dir <dir> --port 8765` launches the annotator; writes stay in that directory (or the current directory), never in the installed package. Demo plates are synthetic; do not add museum images.

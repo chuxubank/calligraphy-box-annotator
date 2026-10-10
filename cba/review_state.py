@@ -107,6 +107,9 @@ def column_entry(state: dict, plate: str, col: int) -> dict:
 
 
 def save_review(path: Path, state: dict) -> None:
+    from boxannotator import ensure_outside_package
+
+    ensure_outside_package(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"version": 1, "columns": state.get("columns") or {}}
     text = json.dumps(payload, ensure_ascii=False, indent=2) + "\n"

@@ -13,9 +13,11 @@ from boxannotator import (
     add_common_arguments,
     discover_plates,
     empty_boxes,
+    ensure_outside_package,
     load_settings,
     load_text_chars,
     normalize_boxes,
+    resolve_data_dir,
     save_boxes,
 )
 from cba.columns import column_boxes, is_int, split_columns
@@ -83,11 +85,15 @@ def _read_object(path: Path) -> dict:
     return data
 
 
-def _resolve_user_path(value: str) -> Path:
+def _resolve_user_path(value: str, base: Path | None = None) -> Path:
     path = Path(value).expanduser()
     if not path.is_absolute():
-        path = Path.cwd() / path
+        path = (base or Path.cwd()) / path
     return path.resolve()
+
+
+def _data_dir(args: argparse.Namespace) -> Path:
+    return resolve_data_dir(args)
 
 
 class Context:
@@ -118,9 +124,16 @@ class Context:
 def _resolve_boxes(settings) -> tuple[Path | None, str]:
     if settings.boxes_path.is_file():
         return settings.boxes_path, "boxes"
-    example = settings.boxes_path.with_name("boxes.example.json")
-    if example.is_file():
-        return example, "example"
+    sibling = settings.boxes_path.with_name("boxes.example.json")
+    if sibling.is_file():
+        return sibling, "example"
+    from boxannotator import demo_dir
+
+    demo = demo_dir()
+    if settings.plates_dir.resolve() == (demo / "plates").resolve():
+        bundled = demo / "boxes.example.json"
+        if bundled.is_file():
+            return bundled, "example"
     return None, "missing"
 
 
@@ -412,7 +425,8 @@ def cmd_export_column(args: argparse.Namespace) -> int:
     image_path = dict(ctx.plates).get(args.plate)
     if image_path is None:
         raise CliError(f"no image for plate {args.plate}")
-    out_dir = _resolve_user_path(args.out) / _safe_component(args.plate)
+    out_dir = _resolve_user_path(args.out, _data_dir(args)) / _safe_component(args.plate)
+    ensure_outside_package(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     stem = f"col-{args.col:02d}"
     image_dest = out_dir / f"{stem}.png"
@@ -496,7 +510,7 @@ def cmd_apply_spec(args: argparse.Namespace) -> int:
     from tools.apply_column_spec import ApplyBlocked, execute_apply
 
     ctx = Context(args, need_boxes=True, need_review=True)
-    spec_path = _resolve_user_path(args.spec)
+    spec_path = _resolve_user_path(args.spec, _data_dir(args))
     if not spec_path.is_file():
         raise CliError(f"spec not found: {display_path(spec_path)}")
     spec = _read_object(spec_path)
@@ -565,12 +579,13 @@ def cmd_contact_sheet(args: argparse.Namespace) -> int:
         raise CliError(f"no plates in {display_path(ctx.settings.plates_dir)}")
     low_path = None
     if args.lowconf:
-        low_path = _resolve_user_path(args.lowconf)
+        low_path = _resolve_user_path(args.lowconf, _data_dir(args))
         if not low_path.is_file():
             raise CliError(f"lowconf file not found: {display_path(low_path)}")
     low_cols = load_low_cols(low_path, args.low_cols)
     font_path = find_cjk_font(ctx.settings.cjk_font)
-    out_dir = _resolve_user_path(args.out)
+    out_dir = _resolve_user_path(args.out, _data_dir(args))
+    ensure_outside_package(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     written: list[Path] = []
     for plate_id, image_path in ctx.plates:
@@ -706,9 +721,37 @@ def cmd_cut(args: argparse.Namespace) -> int:
     return emit(payload, args.json, "\n".join(lines))
 
 
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Launch the annotator. Blocks until the process is interrupted."""
+    from serve import main as serve_main
+
+    forwarded: list[str] = []
+    if args.data_dir:
+        forwarded += ["--data-dir", args.data_dir]
+    if args.config:
+        forwarded += ["--config", args.config]
+    if args.plates_dir:
+        forwarded += ["--plates-dir", args.plates_dir]
+    if args.boxes:
+        forwarded += ["--boxes", args.boxes]
+    if args.text:
+        forwarded += ["--text", args.text]
+    if args.plate_glob:
+        forwarded += ["--plate-glob", args.plate_glob]
+    if args.host:
+        forwarded += ["--host", args.host]
+    if args.port is not None:
+        forwarded += ["--port", str(args.port)]
+    try:
+        serve_main(forwarded)
+    except KeyboardInterrupt:
+        return 0
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="python -m cba",
+        prog="cba",
         description="Agent CLI for per-column calligraphy boxes. Does not call a model API.",
     )
     sub = parser.add_subparsers(dest="command", required=True)
@@ -764,6 +807,9 @@ def build_parser() -> argparse.ArgumentParser:
     add_shared(cut)
     cut.add_argument("--per-column", type=int, default=4, help="exact box count inside each column")
     cut.add_argument("--plate", help="plate id (default: the first plate)")
+
+    serve = sub.add_parser("serve", help="launch the annotator web UI")
+    add_shared(serve)
     return parser
 
 
@@ -775,6 +821,7 @@ _HANDLERS = {
     "validate": cmd_validate,
     "review": cmd_review,
     "cut": cmd_cut,
+    "serve": cmd_serve,
 }
 
 

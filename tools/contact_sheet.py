@@ -183,9 +183,12 @@ def main(argv: list[str] | None = None) -> int:
         low_path = (Path.cwd() / low_path).resolve()
     low_cols = load_low_cols(low_path, args.low_cols)
     font_path = find_cjk_font(settings.cjk_font)
+    from boxannotator import ensure_outside_package, resolve_data_dir
+
     out_dir = Path(args.out).expanduser()
     if not out_dir.is_absolute():
-        out_dir = Path.cwd() / out_dir
+        out_dir = resolve_data_dir(args) / out_dir
+    ensure_outside_package(out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
     written = 0
     for plate_id, image_path in plates.items():
