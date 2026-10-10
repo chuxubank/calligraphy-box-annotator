@@ -154,6 +154,16 @@ def ensure_boxes_file(settings) -> None:
     if settings.boxes_path.exists():
         return
     plate_ids = [plate_id for plate_id, _ in discover_plates(settings.plates_dir, settings.plate_glob)]
+    example = settings.boxes_path.with_name("boxes.example.json")
+    if example.is_file():
+        try:
+            raw = json.loads(example.read_text(encoding="utf-8-sig"))
+        except (OSError, json.JSONDecodeError) as exc:
+            print(f"warning: cannot read {example}: {exc}")
+        else:
+            save_boxes(settings.boxes_path, normalize_boxes(raw, plate_ids, settings.source))
+            print(f"seeded boxes from {example.name}")
+            return
     save_boxes(settings.boxes_path, empty_boxes(plate_ids, settings.source))
 
 

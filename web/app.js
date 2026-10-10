@@ -21,7 +21,8 @@
     selectedId: null, zoom: 1, panX: 0, panY: 0, history: [], dirty: false,
     mode: "idle", drawStart: null, draft: null, moveOffset: null,
     resizeHandle: null, spaceDown: false, lastPointer: null,
-    chars: [], textOffsetByPlate: {},
+    chars: [], textOffsetByPlate: {}, labelMode: "offset",
+    labelField: null, labelSyncId: null,
   };
   function plateId() { return state.plates[state.plateIndex] || null; }
   function boxes() {
@@ -47,8 +48,8 @@
     els.statMsg.textContent = text || "";
     els.statMsg.style.color = ok === false ? "#f08080" : "#7dcea0";
   }
-  /** Reading order: columns RTL (x descending clusters), within column top-to-bottom. */
-  function sortBoxesReadingOrder(list) {
+  /** Columns RTL by center, each column top-to-bottom. Same rule as suggest_missing_ti. */
+  function clusterColumns(list) {
     if (!list || !list.length) return [];
     const items = list.slice();
     const widths = items.map(function (b) { return Math.max(1, b.w); }).sort(function (a, b) { return a - b; });
@@ -73,16 +74,99 @@
       }
       if (!placed) columns.push({ cx: cx, boxes: [b] });
     }
-    // columns already roughly RTL from first-seen order; re-sort by column center desc
     columns.sort(function (a, b) { return b.cx - a.cx; });
-    const ordered = [];
     for (let c = 0; c < columns.length; c++) {
       columns[c].boxes.sort(function (a, b) { return a.y - b.y; });
+    }
+    return columns;
+  }
+  /** Reading order: columns RTL, within a column top-to-bottom. */
+  function sortBoxesReadingOrder(list) {
+    const columns = clusterColumns(list);
+    const ordered = [];
+    for (let c = 0; c < columns.length; c++) {
       for (let j = 0; j < columns[c].boxes.length; j++) ordered.push(columns[c].boxes[j]);
     }
     return ordered;
   }
-  function assignCharsForPlate(pid) {
+  function columnIndexOf(box, list) {
+    const columns = clusterColumns(list);
+    for (let c = 0; c < columns.length; c++) {
+      if (columns[c].boxes.indexOf(box) >= 0) return columns[c].boxes;
+    }
+    return null;
+  }
+  /**
+   * If this box is the only one between neighbours whose ti values leave
+   * exactly one index unused, return that index. Same rule as
+   * boxannotator.suggest_missing_ti.
+   */
+  function suggestMissingTi(box, list) {
+    const column = columnIndexOf(box, list);
+    if (!column) return null;
+    const index = column.indexOf(box);
+    let aboveIndex = -1;
+    let aboveTi = null;
+    for (let j = index - 1; j >= 0; j--) {
+      if (typeof column[j].ti === "number" && isFinite(column[j].ti)) {
+        aboveIndex = j;
+        aboveTi = Math.round(column[j].ti);
+        break;
+      }
+    }
+    let belowIndex = -1;
+    let belowTi = null;
+    for (let j = index + 1; j < column.length; j++) {
+      if (typeof column[j].ti === "number" && isFinite(column[j].ti)) {
+        belowIndex = j;
+        belowTi = Math.round(column[j].ti);
+        break;
+      }
+    }
+    if (aboveTi == null || belowTi == null) return null;
+    if (belowTi - aboveTi === 2 && belowIndex - aboveIndex === 2) return aboveTi + 1;
+    return null;
+  }
+  function isCjkChar(text) {
+    return typeof text === "string" && text.length === 1 && text >= "\u4e00" && text <= "\u9fff";
+  }
+  function parseIndex(text) {
+    const raw = String(text || "").trim();
+    if (!raw) return null;
+    if (!/^-?\d+$/.test(raw)) return NaN;
+    return parseInt(raw, 10);
+  }
+  function syncTiPreview() {
+    const el = document.getElementById("tiPreview");
+    const input = document.getElementById("boxTiInput");
+    if (!el || !input) return;
+    const ti = parseIndex(input.value);
+    if (ti == null) { el.textContent = ""; return; }
+    if (typeof ti !== "number" || ti < 0 || ti >= state.chars.length) { el.textContent = "—"; return; }
+    el.textContent = state.chars[ti];
+  }
+  function syncLabelInputs() {
+    if (state.selectedId !== state.labelSyncId) {
+      state.labelField = null;
+      state.labelSyncId = state.selectedId;
+    }
+    const b = selectedBox();
+    const charInput = document.getElementById("boxCharInput");
+    const tiInput = document.getElementById("boxTiInput");
+    // A toolbar click fires mouseup before the button's click handler. Do not
+    // copy the box back over a value the user, or 邻框补序号, just put in the field.
+    if (charInput && document.activeElement !== charInput && state.labelField !== "char") {
+      charInput.value = b && b.char ? b.char : "";
+    }
+    if (tiInput && document.activeElement !== tiInput && state.labelField !== "ti") {
+      tiInput.value = b && typeof b.ti === "number" && isFinite(b.ti) ? String(Math.round(b.ti)) : "";
+    }
+    syncTiPreview();
+  }
+  function assignCharsForPlate(pid, force) {
+    // labelMode "fixed": labels were aligned per column. Moving a box must not
+    // re-derive every label from the running plate offset. 重贴标签 passes force.
+    if (state.labelMode === "fixed" && !force) return;
     const list = state.boxesByPlate[pid] || [];
     const start = typeof state.textOffsetByPlate[pid] === "number"
       ? Math.max(0, Math.floor(state.textOffsetByPlate[pid]))
@@ -93,10 +177,19 @@
       ordered[i].char = (idx >= 0 && idx < state.chars.length) ? state.chars[idx] : "";
     }
   }
-  function assignCharsCurrent() {
+  function assignCharsCurrent(force) {
     const id = plateId();
     if (!id) return;
-    assignCharsForPlate(id);
+    assignCharsForPlate(id, force);
+  }
+  function selectedBox() {
+    return boxes().find(function (b) { return b.id === state.selectedId; }) || null;
+  }
+  function reasonLabel(reason) {
+    if (reason === "repair") return "补纸";
+    if (reason === "blank") return "空白";
+    if (reason === "damaged") return "残损";
+    return "";
   }
   function pushHistory() {
     const id = plateId();
@@ -143,13 +236,28 @@
       els.statPreview.textContent = preview ? ("释文: " + preview + (total > start + 8 ? "…" : "")) : "";
     }
     if (els.statSelChar) {
-      const sel = boxes().find(function (b) { return b.id === state.selectedId; });
-      els.statSelChar.textContent = (sel && sel.char) ? sel.char : "";
+      const sel = selectedBox();
+      let label = (sel && sel.char) ? sel.char : "";
+      if (sel && sel.repeatMark) label += " 重文";
+      if (sel && sel.noCard) label += " 不制卡" + (reasonLabel(sel.noCardReason) ? ("·" + reasonLabel(sel.noCardReason)) : "");
+      els.statSelChar.textContent = label;
     }
+    const repeatBtn = document.getElementById("btnRepeat");
+    const noCardBtn = document.getElementById("btnNoCard");
+    const reasonSel = document.getElementById("noCardReason");
+    const modeSel = document.getElementById("labelMode");
+    const selBox = selectedBox();
+    if (repeatBtn) repeatBtn.classList.toggle("active", !!(selBox && selBox.repeatMark));
+    if (noCardBtn) noCardBtn.classList.toggle("active", !!(selBox && selBox.noCard));
+    if (reasonSel && selBox && selBox.noCardReason && document.activeElement !== reasonSel) {
+      reasonSel.value = selBox.noCardReason;
+    }
+    if (modeSel && document.activeElement !== modeSel) modeSel.value = state.labelMode || "offset";
     if (els.textOffsetInput && document.activeElement !== els.textOffsetInput) {
       els.textOffsetInput.value = String(start);
       els.textOffsetInput.max = String(Math.max(0, total));
     }
+    syncLabelInputs();
   }
   function fitZoom() {
     if (!state.image) return;
@@ -219,8 +327,16 @@
     const bh = fontPx + padY * 2;
     const bx = b.x;
     const by = b.y;
-    ctx.fillStyle = sel ? "rgba(47,111,237,0.92)" : "rgba(15,23,42,0.88)";
-    ctx.strokeStyle = sel ? "#93c5fd" : "#f8fafc";
+    if (b.repeatMark && !b.noCard) {
+      ctx.fillStyle = "rgba(75,85,99,0.92)";
+      ctx.strokeStyle = "#d1d5db";
+    } else if (b.noCard) {
+      ctx.fillStyle = "rgba(3,105,161,0.92)";
+      ctx.strokeStyle = "#7dd3fc";
+    } else {
+      ctx.fillStyle = sel ? "rgba(47,111,237,0.92)" : "rgba(15,23,42,0.88)";
+      ctx.strokeStyle = sel ? "#93c5fd" : "#f8fafc";
+    }
     ctx.lineWidth = 1 / state.zoom;
     const r = 2 / state.zoom;
     // rounded-ish rect via path
@@ -241,6 +357,26 @@
     ctx.textBaseline = "top";
     ctx.fillText(ch, bx + padX, by + padY);
   }
+  function drawFlagTag(b) {
+    const tags = [];
+    if (b.repeatMark) tags.push("重文");
+    if (b.noCard) tags.push(reasonLabel(b.noCardReason) || "不制卡");
+    if (!tags.length) return;
+    const fontPx = Math.max(11, 13) / state.zoom;
+    ctx.font = "600 " + fontPx + "px sans-serif";
+    ctx.textBaseline = "top";
+    const text = tags.join(" ");
+    const pad = 3 / state.zoom;
+    const tw = ctx.measureText(text).width;
+    const bw = tw + pad * 2;
+    const bh = fontPx + pad * 2;
+    const bx = b.x + b.w - bw;
+    const by = b.y;
+    ctx.fillStyle = b.noCard ? "rgba(3,105,161,0.92)" : "rgba(55,65,81,0.92)";
+    ctx.fillRect(bx, by, bw, bh);
+    ctx.fillStyle = "#f8fafc";
+    ctx.fillText(text, bx + pad, by + pad);
+  }
   function draw() {
     const wrap = els.canvas.parentElement;
     const w = wrap.clientWidth, h = wrap.clientHeight;
@@ -259,13 +395,31 @@
     for (let i = 0; i < list.length; i++) {
       const b = list[i];
       const sel = b.id === state.selectedId;
+      let stroke = sel ? "#2f6fed" : "#22c55e";
+      let fill = sel ? "rgba(47,111,237,0.18)" : "rgba(34,197,94,0.12)";
+      if (b.noCard) {
+        stroke = sel ? "#38bdf8" : "#0284c7";
+        fill = "rgba(14,165,233,0.20)";
+      } else if (b.repeatMark) {
+        stroke = sel ? "#e5e7eb" : "#9ca3af";
+        fill = "rgba(156,163,175,0.22)";
+      }
       ctx.lineWidth = (sel ? 2.5 : 1.5) / state.zoom;
-      ctx.strokeStyle = sel ? "#2f6fed" : "#22c55e";
-      ctx.fillStyle = sel ? "rgba(47,111,237,0.18)" : "rgba(34,197,94,0.12)";
+      ctx.strokeStyle = stroke;
+      ctx.fillStyle = fill;
       ctx.fillRect(b.x, b.y, b.w, b.h);
       ctx.strokeRect(b.x, b.y, b.w, b.h);
+      if (b.noCard) {
+        ctx.beginPath();
+        ctx.moveTo(b.x, b.y);
+        ctx.lineTo(b.x + b.w, b.y + b.h);
+        ctx.stroke();
+      }
+      drawFlagTag(b);
       // small id at bottom-left (secondary); char badge at top-left
-      ctx.fillStyle = sel ? "rgba(47,111,237,0.85)" : "rgba(22,163,74,0.75)";
+      ctx.fillStyle = b.noCard
+        ? "rgba(2,132,199,0.9)"
+        : (b.repeatMark ? "rgba(75,85,99,0.9)" : (sel ? "rgba(47,111,237,0.85)" : "rgba(22,163,74,0.75)"));
       ctx.font = (10 / state.zoom) + "px sans-serif";
       ctx.textBaseline = "alphabetic";
       ctx.fillText("#" + b.id, b.x + 2 / state.zoom, b.y + b.h - 3 / state.zoom);
@@ -379,7 +533,8 @@
     else if (hitTest(img.x, img.y)) els.canvas.style.cursor = "move";
     else els.canvas.style.cursor = "crosshair";
   }
-  function onPointerUp() {
+  function onPointerUp(e) {
+    const gesture = state.mode === "draw" || state.mode === "move" || state.mode === "resize" || state.mode === "pan";
     if (state.mode === "draw" && state.draft) {
       const d = clampBox(state.draft);
       if (d.w >= MIN_BOX && d.h >= MIN_BOX) {
@@ -408,7 +563,9 @@
     }
     state.mode = "idle"; state.lastPointer = null;
     els.canvas.style.cursor = state.spaceDown ? "grab" : "crosshair";
-    updateStatus(); draw();
+    // Toolbar buttons also receive mouseup. Refreshing the inputs here would
+    // wipe a suggested 序号 before the button's click handler can read it.
+    if (gesture) { updateStatus(); draw(); }
   }
   function deleteSelected() {
     if (state.selectedId == null) { msg("未选中框", false); return; }
@@ -429,12 +586,95 @@
   function relabelCurrent() {
     const id = plateId();
     if (!id) return;
+    if (state.labelMode === "fixed") {
+      const ok = confirm("固定模式下重贴标签会按释文起点覆盖本张全部框的字，逐列对齐会被改掉。继续覆盖？");
+      if (!ok) { msg("已取消重贴"); return; }
+    }
     pushHistory();
     setTextOffset(els.textOffsetInput ? els.textOffsetInput.value : getTextOffset());
-    assignCharsCurrent();
+    assignCharsCurrent(true);
     state.dirty = true;
     updateStatus(); draw();
-    msg("已重贴标签 · 起点 " + getTextOffset());
+    msg((state.labelMode === "fixed" ? "已按起点覆盖固定标签 · 起点 " : "已重贴标签 · 起点 ") + getTextOffset());
+  }
+  function applyLabelToSelected() {
+    const b = selectedBox();
+    if (!b) { msg("未选中框", false); return; }
+    const tiInput = document.getElementById("boxTiInput");
+    const charInput = document.getElementById("boxCharInput");
+    const tiParsed = parseIndex(tiInput ? tiInput.value : "");
+    const charText = charInput ? charInput.value.trim() : "";
+    if (charText && !isCjkChar(charText)) { msg("字需要是一个汉字", false); return; }
+    const tiReady = typeof tiParsed === "number" && !isNaN(tiParsed);
+    const useTi = state.labelField === "ti" || (state.labelField !== "char" && tiReady);
+    if (useTi) {
+      if (tiParsed == null || isNaN(tiParsed)) { msg("先填写释文序号", false); return; }
+      if (tiParsed < 0 || tiParsed >= state.chars.length) {
+        msg("序号超出释文（0–" + Math.max(0, state.chars.length - 1) + "）", false);
+        return;
+      }
+      pushHistory();
+      b.ti = tiParsed;
+      b.char = state.chars[tiParsed];
+    } else if (charText) {
+      pushHistory();
+      b.char = charText;
+    } else {
+      msg("填写一个字，或填写释文序号", false);
+      return;
+    }
+    state.labelField = null;
+    state.dirty = true;
+    updateStatus();
+    draw();
+    const tiNote = typeof b.ti === "number" ? (" · 序号 " + b.ti) : "";
+    const modeNote = state.labelMode === "offset" ? "（跟随起点时，保存仍会按起点重贴）" : "";
+    msg("已贴到 #" + b.id + " · " + b.char + tiNote + modeNote);
+  }
+  function suggestTiForSelected() {
+    const b = selectedBox();
+    if (!b) { msg("未选中框", false); return; }
+    const ti = suggestMissingTi(b, boxes());
+    const input = document.getElementById("boxTiInput");
+    if (ti == null) { msg("邻框没有正好空出一位", false); return; }
+    if (input) input.value = String(ti);
+    state.labelField = "ti";
+    syncTiPreview();
+    const ch = ti >= 0 && ti < state.chars.length ? state.chars[ti] : "";
+    msg("建议序号 " + ti + (ch ? (" · " + ch) : "") + "，按 L 或「贴到选中」写入");
+  }
+  function toggleRepeat() {
+    const b = selectedBox();
+    if (!b) { msg("未选中框", false); return; }
+    pushHistory();
+    b.repeatMark = !b.repeatMark;
+    state.dirty = true;
+    updateStatus(); draw();
+    msg(b.repeatMark ? "已标重文点" : "已取消重文点");
+  }
+  function toggleNoCard() {
+    const b = selectedBox();
+    if (!b) { msg("未选中框", false); return; }
+    pushHistory();
+    b.noCard = !b.noCard;
+    if (b.noCard) {
+      const reasonSel = document.getElementById("noCardReason");
+      const reason = reasonSel ? reasonSel.value : "damaged";
+      b.noCardReason = reason === "repair" || reason === "blank" || reason === "damaged" ? reason : "damaged";
+    } else {
+      b.noCardReason = "";
+    }
+    state.dirty = true;
+    updateStatus(); draw();
+    msg(b.noCard ? ("不制卡 · " + reasonLabel(b.noCardReason)) : "已取消不制卡");
+  }
+  function setLabelMode(mode) {
+    const next = mode === "fixed" ? "fixed" : "offset";
+    if (next === state.labelMode) return;
+    state.labelMode = next;
+    state.dirty = true;
+    updateStatus();
+    msg(next === "fixed" ? "标签模式：固定（移动框不会重贴）" : "标签模式：跟随起点");
   }
   function zoomAt(factor, pivot) {
     const wrap = els.canvas.parentElement;
@@ -482,6 +722,7 @@
     assignCharsCurrent();
     const body = {
       source: "manual",
+      labelMode: state.labelMode === "fixed" ? "fixed" : "offset",
       textOffsetByPlate: {},
       plates: {},
     };
@@ -493,6 +734,15 @@
       body.plates[pid] = (state.boxesByPlate[pid] || []).map(function (b) {
         const item = { id: b.id, x: b.x, y: b.y, w: b.w, h: b.h };
         if (b.char) item.char = b.char;
+        if (typeof b.col === "number" && isFinite(b.col)) item.col = Math.round(b.col);
+        if (typeof b.ti === "number" && isFinite(b.ti)) item.ti = Math.round(b.ti);
+        if (b.repeatMark === true) item.repeatMark = true;
+        if (b.noCard === true) {
+          item.noCard = true;
+          if (b.noCardReason === "repair" || b.noCardReason === "blank" || b.noCardReason === "damaged") {
+            item.noCardReason = b.noCardReason;
+          }
+        }
         return item;
       });
     }
@@ -521,6 +771,7 @@
     state.chars = Array.isArray(textData.chars) ? textData.chars : [];
     state.boxesByPlate = {};
     state.textOffsetByPlate = {};
+    state.labelMode = boxesData.labelMode === "fixed" ? "fixed" : "offset";
     const savedOffsets = boxesData.textOffsetByPlate || {};
     for (let i = 0; i < state.plates.length; i++) {
       const pid = state.plates[i];
@@ -529,6 +780,11 @@
         return {
           id: b.id, x: b.x, y: b.y, w: b.w, h: b.h,
           char: typeof b.char === "string" ? b.char : "",
+          col: typeof b.col === "number" ? b.col : undefined,
+          ti: typeof b.ti === "number" ? b.ti : undefined,
+          repeatMark: b.repeatMark === true,
+          noCard: b.noCard === true,
+          noCardReason: typeof b.noCardReason === "string" ? b.noCardReason : "",
         };
       });
       const off = savedOffsets[pid];
@@ -555,6 +811,45 @@
     document.getElementById("btnZoomOut").onclick = function () { zoomAt(1 / 1.15); };
     document.getElementById("btnZoomReset").onclick = function () { fitZoom(); updateStatus(); draw(); };
     document.getElementById("btnRelabel").onclick = relabelCurrent;
+    const labelBtn = document.getElementById("btnLabelBox");
+    const suggestBtn = document.getElementById("btnSuggestTi");
+    const charInput = document.getElementById("boxCharInput");
+    const tiInput = document.getElementById("boxTiInput");
+    if (labelBtn) labelBtn.onclick = applyLabelToSelected;
+    if (suggestBtn) suggestBtn.onclick = suggestTiForSelected;
+    if (charInput) {
+      charInput.addEventListener("input", function () { state.labelField = "char"; });
+      charInput.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); applyLabelToSelected(); }
+      });
+    }
+    if (tiInput) {
+      tiInput.addEventListener("input", function () {
+        state.labelField = "ti";
+        syncTiPreview();
+      });
+      tiInput.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") { e.preventDefault(); applyLabelToSelected(); }
+      });
+    }
+    const repeatBtn = document.getElementById("btnRepeat");
+    const noCardBtn = document.getElementById("btnNoCard");
+    const modeSel = document.getElementById("labelMode");
+    const reasonSel = document.getElementById("noCardReason");
+    if (repeatBtn) repeatBtn.onclick = toggleRepeat;
+    if (noCardBtn) noCardBtn.onclick = toggleNoCard;
+    if (modeSel) modeSel.addEventListener("change", function () { setLabelMode(modeSel.value); });
+    if (reasonSel) {
+      reasonSel.addEventListener("change", function () {
+        const b = selectedBox();
+        if (!b || !b.noCard) return;
+        pushHistory();
+        b.noCardReason = reasonSel.value;
+        state.dirty = true;
+        updateStatus(); draw();
+        msg("不制卡 · " + reasonLabel(b.noCardReason));
+      });
+    }
     if (els.textOffsetInput) {
       els.textOffsetInput.addEventListener("change", function () {
         pushHistory();
@@ -596,6 +891,8 @@
         e.preventDefault(); loadPlate(state.plateIndex - 1);
       } else if (!e.ctrlKey && !e.metaKey && e.key.toLowerCase() === "s") {
         e.preventDefault(); saveBoxes();
+      } else if (!e.ctrlKey && !e.metaKey && !e.altKey && e.key.toLowerCase() === "l") {
+        e.preventDefault(); applyLabelToSelected();
       }
     });
     window.addEventListener("keyup", function (e) {

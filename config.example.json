@@ -6,5 +6,6 @@
   "text": "examples/demo/transcription.txt",
   "plate_glob": "*.png",
   "source": "manual",
-  "crop_out": "cropped"
+  "crop_out": "cropped",
+  "cjk_font": ""
 }

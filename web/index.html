@@ -23,11 +23,39 @@
       <button type="button" id="btnSave" class="primary" title="S">保存</button>
     </div>
     <div class="group text-offset-group">
-      <label class="text-offset-label" title="当前图版阅读顺序第一个框对应的释文全局下标">释文起点
+      <label class="text-offset-label" title="跟随起点：按图版释文起点自动贴标签。固定：保留每个框自己的字，移动框不会把后面的字全部错位。">标签
+        <select id="labelMode">
+          <option value="offset">跟随起点</option>
+          <option value="fixed">固定</option>
+        </select>
+      </label>
+      <label class="text-offset-label" title="当前图版阅读顺序第一个框对应的释文全局下标。固定模式下只在点「重贴标签」时使用。">释文起点
         <input type="number" id="textOffsetInput" min="0" step="1" value="0" />
       </label>
-      <button type="button" id="btnRelabel">重贴标签</button>
+      <button type="button" id="btnRelabel" title="固定模式下会先确认：确认后按释文起点覆盖本张全部框">重贴标签</button>
       <span id="statTextProgress" class="text-progress">释文: 0/0</span>
+    </div>
+    <div class="group">
+      <label class="text-offset-label" title="直接写选中框的字。只改这一个框，不重贴其他框。">字
+        <input type="text" id="boxCharInput" class="char-input" autocomplete="off" />
+      </label>
+      <label class="text-offset-label" title="释文序号，从 0 计。贴上时用释文里这个位置的字，旁边先显示预览。">序号
+        <input type="number" id="boxTiInput" class="ti-input" min="0" step="1" />
+        <span id="tiPreview" class="ti-preview" title="释文在这个序号上的字"></span>
+      </label>
+      <button type="button" id="btnLabelBox" title="L · 只把字或序号贴到选中框">贴到选中</button>
+      <button type="button" id="btnSuggestTi" title="同一列上方序号 a、下方序号 b，中间正好空一位、且只有这一个框时，把这一位填进序号框">邻框补序号</button>
+    </div>
+    <div class="group">
+      <button type="button" id="btnRepeat" title="选中框是重文点：保留标签，制卡时不能当作异写">重文点</button>
+      <button type="button" id="btnNoCard" title="选中框保留位置和标签，但不制卡">不制卡</button>
+      <label class="text-offset-label">原因
+        <select id="noCardReason">
+          <option value="repair">补纸</option>
+          <option value="blank">空白</option>
+          <option value="damaged">残损</option>
+        </select>
+      </label>
     </div>
     <div class="group">
       <button type="button" id="btnZoomOut">缩小</button>
@@ -48,7 +76,10 @@
   </main>
   <footer class="hint">
     拖拽绘制矩形 · 点击选中 · 拖动边角缩放 · 滚轮缩放 · 空格/中键拖动画布 · 坐标：完整图像像素空间（含边框）
-    · 框标签按列右→左、列内上→下对应释文；改「释文起点」后点「重贴标签」
+    · 跟随起点时，框标签按列右→左、列内上→下对应释文；固定模式下几何变化不重贴
+    · 选中框后填「字」或「序号」（序号旁是释文预览），按 L 或「贴到选中」只改这一个框；「邻框补序号」在上下正好空一位时填入序号
+    · 「重贴标签」在固定模式下会先确认，确认后才按起点覆盖整张
+    · 灰框「重文」是重文点；蓝框斜线是不制卡（补纸 / 空白 / 残损）
   </footer>
   <script src="app.js"></script>
 </body>

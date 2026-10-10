@@ -30,6 +30,7 @@ DEFAULTS: dict[str, object] = {
     "plate_glob": "",
     "source": "manual",
     "crop_out": "cropped",
+    "cjk_font": "",
 }
 
 ENV_KEYS = {
@@ -41,7 +42,32 @@ ENV_KEYS = {
     "plate_glob": "CBA_PLATE_GLOB",
     "source": "CBA_SOURCE",
     "crop_out": "CBA_CROP_OUT",
+    "cjk_font": "CBA_FONT",
 }
+
+NO_CARD_REASONS = ("repair", "blank", "damaged")
+REPEAT_NOTE = (
+    "repeatMark boxes keep their label but must not be used as an alternate writing"
+)
+NOCARD_NOTE = (
+    "noCard boxes keep their box and label but are not carded; "
+    "noCardReason is repair, blank, or damaged"
+)
+
+FONT_CANDIDATES = (
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSerifCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",
+    "/System/Library/Fonts/Supplemental/Songti.ttc",
+    "/System/Library/Fonts/PingFang.ttc",
+    "/System/Library/Fonts/STHeiti Light.ttc",
+    "C:/Windows/Fonts/msyh.ttc",
+    "C:/Windows/Fonts/simsun.ttc",
+    "C:/Windows/Fonts/simhei.ttf",
+)
 
 
 @dataclass(frozen=True)
@@ -54,6 +80,7 @@ class Settings:
     plate_glob: str | None
     source: str
     crop_out: Path
+    cjk_font: Path | None
     config_path: Path | None
 
 
@@ -154,6 +181,11 @@ def load_settings(args: argparse.Namespace | None = None) -> Settings:
     if not isinstance(host, str) or not host.strip():
         die("host must be a non-empty string")
 
+    font_value = values["cjk_font"]
+    cjk_font = None
+    if isinstance(font_value, str) and font_value.strip():
+        cjk_font = _resolve_path(font_value, bases["cjk_font"], "cjk_font")
+
     return Settings(
         host=host.strip(),
         port=_as_port(values["port"]),
@@ -163,8 +195,25 @@ def load_settings(args: argparse.Namespace | None = None) -> Settings:
         plate_glob=plate_glob,
         source=_as_source(values["source"]),
         crop_out=_resolve_path(values["crop_out"], bases["crop_out"], "crop_out"),
+        cjk_font=cjk_font,
         config_path=config_path,
     )
+
+
+def find_cjk_font(explicit: Path | None = None) -> str:
+    """First existing CJK font: explicit path, CBA_FONT, CBA_DEMO_FONT, then common system paths."""
+    candidates: list[str] = []
+    if explicit is not None:
+        candidates.append(str(explicit))
+    for key in ("CBA_FONT", "CBA_DEMO_FONT"):
+        env = os.environ.get(key)
+        if env:
+            candidates.append(env)
+    candidates.extend(FONT_CANDIDATES)
+    for candidate in candidates:
+        if candidate and Path(candidate).is_file():
+            return candidate
+    die("No CJK font found. Set cjk_font in the config, or CBA_FONT to a font file.")
 
 
 def add_common_arguments(parser: argparse.ArgumentParser, *, crop: bool = False) -> None:
@@ -288,7 +337,95 @@ def clean_box(raw: object) -> dict | None:
     char = raw.get("char")
     if isinstance(char, str) and len(char) == 1 and CJK_RE.fullmatch(char):
         item["char"] = char
+    for key in ("col", "ti"):
+        parsed = _as_int_field(raw.get(key))
+        if parsed is not None:
+            item[key] = parsed
+    if raw.get("repeatMark") is True:
+        item["repeatMark"] = True
+    if raw.get("noCard") is True:
+        item["noCard"] = True
+        reason = raw.get("noCardReason")
+        if reason in NO_CARD_REASONS:
+            item["noCardReason"] = reason
     return item
+
+
+def _as_int_field(value: object) -> int | None:
+    if isinstance(value, bool) or value is None:
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float) and value.is_integer():
+        return int(value)
+    return None
+
+
+def suggest_missing_ti(boxes: list[dict], target_id: int, thresh_ratio: float = 0.55) -> int | None:
+    """Suggest a transcription index for one box from its column neighbours.
+
+    Columns are clustered the same way as the annotator (right to left, using
+    each box's center and a threshold of ``thresh_ratio`` times the median
+    width). Within that column, if the nearest box above has ``ti == a``, the
+    nearest box below has ``ti == b``, exactly one index is missing
+    (``b == a + 2``), and the target is the only box between them, return
+    ``a + 1``. Otherwise return None.
+    """
+    for column in _cluster_columns(boxes, thresh_ratio):
+        ids = [box.get("id") for box in column]
+        if target_id not in ids:
+            continue
+        index = ids.index(target_id)
+        above_at: tuple[int, int] | None = None
+        for cursor in range(index - 1, -1, -1):
+            ti = _as_int_field(column[cursor].get("ti"))
+            if ti is not None:
+                above_at = (cursor, ti)
+                break
+        below_at: tuple[int, int] | None = None
+        for cursor in range(index + 1, len(column)):
+            ti = _as_int_field(column[cursor].get("ti"))
+            if ti is not None:
+                below_at = (cursor, ti)
+                break
+        if above_at is None or below_at is None:
+            return None
+        above_index, above_ti = above_at
+        below_index, below_ti = below_at
+        if below_ti - above_ti == 2 and below_index - above_index == 2:
+            return above_ti + 1
+        return None
+    return None
+
+
+def _cluster_columns(boxes: list[dict], thresh_ratio: float) -> list[list[dict]]:
+    if not boxes:
+        return []
+    widths = sorted(max(1.0, float(box["w"])) for box in boxes)
+    median_w = widths[len(widths) // 2]
+    thresh = thresh_ratio * median_w
+    items = sorted(boxes, key=lambda box: -(float(box["x"]) + float(box["w"]) / 2))
+    columns: list[dict] = []
+    for box in items:
+        center = float(box["x"]) + float(box["w"]) / 2
+        placed = False
+        for column in columns:
+            if abs(center - column["cx"]) < thresh:
+                column["boxes"].append(box)
+                count = len(column["boxes"])
+                column["cx"] = (column["cx"] * (count - 1) + center) / count
+                placed = True
+                break
+        if not placed:
+            columns.append({"cx": center, "boxes": [box]})
+    columns.sort(key=lambda column: -column["cx"])
+    return [sorted(column["boxes"], key=lambda box: float(box["y"])) for column in columns]
+
+
+def label_mode_of(data: object) -> str:
+    if isinstance(data, dict) and data.get("labelMode") == "fixed":
+        return "fixed"
+    return "offset"
 
 
 def _offset(value: object) -> int:
@@ -298,9 +435,12 @@ def _offset(value: object) -> int:
         return 0
 
 
-def empty_boxes(plate_ids: list[str], source: str) -> dict:
+def empty_boxes(plate_ids: list[str], source: str, label_mode: str = "offset") -> dict:
     return {
         "source": source,
+        "labelMode": "fixed" if label_mode == "fixed" else "offset",
+        "repeatMarkNote": REPEAT_NOTE,
+        "noCardNote": NOCARD_NOTE,
         "textOffsetByPlate": {plate_id: 0 for plate_id in plate_ids},
         "plates": {plate_id: [] for plate_id in plate_ids},
     }
@@ -326,6 +466,9 @@ def normalize_boxes(data: object, plate_ids: list[str], source: str) -> dict:
         offsets[plate_id] = _offset(raw_offsets.get(plate_id, 0))
     return {
         "source": _as_source(file_source) if isinstance(file_source, str) and file_source.strip() else source,
+        "labelMode": label_mode_of(raw),
+        "repeatMarkNote": REPEAT_NOTE,
+        "noCardNote": NOCARD_NOTE,
         "textOffsetByPlate": offsets,
         "plates": plates,
     }
@@ -349,16 +492,23 @@ def save_boxes(path: Path, data: dict) -> None:
     tmp.replace(path)
 
 
-def glyph_filename(plate_id: str, box_id: int, char: str | None, used: set[str]) -> str:
+def glyph_filename(
+    plate_id: str,
+    box_id: int,
+    char: str | None,
+    used: set[str],
+    repeat: bool = False,
+) -> str:
     safe = re.sub(r"[^\w.\-]+", "_", plate_id, flags=re.UNICODE).strip("._") or "plate"
     suffix = f"_{char}" if char else ""
-    name = f"{safe}_{int(box_id):04d}{suffix}.png"
+    mark = "_repeat" if repeat else ""
+    name = f"{safe}_{int(box_id):04d}{suffix}{mark}.png"
     if name not in used:
         used.add(name)
         return name
     serial = 2
     while True:
-        candidate = f"{safe}_{int(box_id):04d}{suffix}_{serial}.png"
+        candidate = f"{safe}_{int(box_id):04d}{suffix}{mark}_{serial}.png"
         if candidate not in used:
             used.add(candidate)
             return candidate
@@ -390,9 +540,17 @@ class CropReport:
     written: list[Path]
     skipped: int
     missing_plates: list[str]
+    skipped_nocard: int = 0
+    skipped_repeat: int = 0
 
 
-def crop_plates(settings: Settings, boxes: dict | None = None) -> CropReport:
+def crop_plates(
+    settings: Settings,
+    boxes: dict | None = None,
+    *,
+    include_nocard: bool = False,
+    skip_repeat: bool = False,
+) -> CropReport:
     try:
         from PIL import Image
     except ImportError:
@@ -407,6 +565,8 @@ def crop_plates(settings: Settings, boxes: dict | None = None) -> CropReport:
 
     written: list[Path] = []
     skipped = 0
+    skipped_nocard = 0
+    skipped_repeat = 0
     missing: list[str] = []
     used: set[str] = set()
     plates = document.get("plates") if isinstance(document.get("plates"), dict) else {}
@@ -427,12 +587,26 @@ def crop_plates(settings: Settings, boxes: dict | None = None) -> CropReport:
                     if box is None:
                         skipped += 1
                         continue
+                    if box.get("noCard") is True and not include_nocard:
+                        skipped += 1
+                        skipped_nocard += 1
+                        continue
+                    if box.get("repeatMark") is True and skip_repeat:
+                        skipped += 1
+                        skipped_repeat += 1
+                        continue
                     glyph = crop_image_box(image, box)
                     if glyph is None:
                         skipped += 1
                         continue
                     char = box.get("char") if isinstance(box.get("char"), str) else None
-                    name = glyph_filename(plate_id, int(box["id"]), char, used)
+                    name = glyph_filename(
+                        plate_id,
+                        int(box["id"]),
+                        char,
+                        used,
+                        repeat=box.get("repeatMark") is True,
+                    )
                     dest = out_dir / name
                     if not dest.resolve().is_relative_to(out_dir):
                         skipped += 1
@@ -443,4 +617,10 @@ def crop_plates(settings: Settings, boxes: dict | None = None) -> CropReport:
             print(f"warning: cannot read {image_path}: {exc}", file=sys.stderr)
             missing.append(plate_id)
             skipped += len(items)
-    return CropReport(written=written, skipped=skipped, missing_plates=missing)
+    return CropReport(
+        written=written,
+        skipped=skipped,
+        missing_plates=missing,
+        skipped_nocard=skipped_nocard,
+        skipped_repeat=skipped_repeat,
+    )

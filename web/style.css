@@ -16,18 +16,30 @@ body {
   position: sticky; top: 0; z-index: 10;
 }
 .group { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
-button, select, input[type="number"] {
+button, select, input[type="number"], input[type="text"] {
   font: inherit; font-size: 15px; padding: 8px 14px;
   border-radius: 6px; border: 1px solid #555; background: #3a3b42; color: #fff;
   cursor: pointer;
 }
-input[type="number"] {
+input[type="number"], input[type="text"] {
   width: 5.5em; cursor: text; padding: 8px 10px;
+}
+input.char-input {
+  width: 2.8em; text-align: center; padding: 8px 6px;
+  font-family: "Songti SC", "Noto Serif SC", "SimSun", serif;
+  font-size: 18px;
+}
+input.ti-input { width: 4.2em; }
+.ti-preview {
+  font-family: "Songti SC", "Noto Serif SC", "SimSun", serif;
+  font-size: 20px; font-weight: 600; color: #f0e6c8;
+  min-width: 1em; text-align: center;
 }
 button:hover { background: #4a4b55; }
 button:active { transform: translateY(1px); }
 button.primary { background: #2f6fed; border-color: #2f6fed; }
 button.primary:hover { background: #4580f5; }
+button.active { outline: 2px solid #fbbf24; background: #4b5563; }
 button.danger { background: #a33; border-color: #a33; }
 .plate-select, .text-offset-label {
   display: flex; gap: 6px; align-items: center; font-size: 15px;
