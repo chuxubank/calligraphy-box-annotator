@@ -1,0 +1,379 @@
+@font-face {
+  font-family: "AlbumSerif";
+  src: url("_serif.otf");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "AlbumCaoshu";
+  src: url("_caoshu.ttf");
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --paper: #f4ecd8;
+  --ink: #1c1a17;
+  --quiet: #9a9284;
+  --rule: #c9c0ac;
+  --pane: 100%;
+  --serif: "AlbumSerif", "Source Han Serif SC", "Source Han Serif CN",
+           "Noto Serif CJK SC", "Songti SC", "STSong", serif;
+  --grass: "AlbumCaoshu", "AlbumSerif", serif;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#qa,
+.card {
+  background: var(--paper);
+  background-color: var(--paper);
+  color: var(--ink);
+  height: var(--pane, 100%);
+  min-height: var(--pane, 100%);
+  max-height: var(--pane, 100%);
+  margin: 0;
+  padding: 0;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+
+.card {
+  font-family: var(--serif);
+  text-align: center;
+  font-size: clamp(14px, 4.2vmin, 22px);
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: stretch;
+  width: 100%;
+}
+
+.leaf {
+  width: 100%;
+  height: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  padding: 4vmin 5vmin;
+  overflow: hidden;
+}
+
+.leaf[data-same="1"] .front-pair {
+  display: none;
+}
+
+.leaf[data-same="0"] .front-single {
+  display: none;
+}
+
+.han {
+  line-height: 1;
+  font-weight: 400;
+  color: var(--ink);
+  font-synthesis: none;
+}
+
+.han.printed {
+  font-family: var(--serif);
+  font-size: clamp(48px, 16vmin, 110px);
+}
+
+.han.printed.solo {
+  font-size: clamp(64px, 22vmin, 140px);
+}
+
+.han.cursive {
+  font-family: var(--grass);
+  font-size: clamp(72px, 26vmin, 168px);
+}
+
+.front-single,
+.front-pair {
+  min-height: 0;
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+}
+
+.leaf:not(.back) .front-single,
+.leaf:not(.back) .front-pair {
+  flex: 1 1 auto;
+  height: 100%;
+}
+
+.pair {
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+}
+
+.sep {
+  width: 1px;
+  background: var(--rule);
+  align-self: stretch;
+  margin: 0.18em 1.1em 1.6em;
+  flex: 0 0 1px;
+}
+
+.cap {
+  font-family: var(--serif);
+  font-size: clamp(10px, 2.2vmin, 14px);
+  line-height: 1;
+  color: var(--quiet);
+  margin-top: 0.28em;
+  letter-spacing: 0.18em;
+  font-weight: 400;
+}
+
+.leaf.back {
+  display: grid;
+  grid-template-rows: minmax(0, 1fr) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
+  align-items: stretch;
+  justify-items: stretch;
+  padding: 0;
+}
+
+.leaf.back .reprise,
+.leaf.back .gallery {
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.leaf.back .reprise {
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+  padding: 2vmin 5vmin;
+  margin: 0;
+  border-bottom: 1px solid var(--rule);
+  container-type: size;
+  min-height: 0;
+}
+
+.leaf.back .reprise .front-single,
+.leaf.back .reprise .front-pair {
+  flex: 0 0 auto;
+  min-height: 0;
+  width: 100%;
+}
+
+.leaf.back .reprise .han.printed {
+  font-size: clamp(40px, 13vmin, 94px);
+}
+
+.leaf.back .reprise .han.printed.solo {
+  font-size: clamp(52px, 16vmin, 114px);
+}
+
+.leaf.back .reprise .sep {
+  margin: 0.12em 0.7em 0.9em;
+}
+
+.gallery {
+  flex-direction: row;
+  flex-wrap: nowrap;
+  width: 100%;
+  height: 100%;
+  gap: 2.2%;
+  padding: 2vmin 4vmin;
+  container-type: size;
+  min-height: 0;
+}
+
+.gallery .fallback {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 32px;
+  overflow: hidden;
+  container-type: size;
+}
+
+.gallery .fallback .han.cursive {
+  flex: 0 0 auto;
+  font-size: clamp(94px, 34vmin, 220px);
+}
+
+.slot {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  overflow: hidden;
+  container-type: size;
+}
+
+.slot img {
+  display: block;
+  width: auto;
+  height: 34vmin;
+  max-width: 100%;
+  max-height: calc(100% - 16px - 1.3em);
+  object-fit: contain;
+  object-position: center;
+  mix-blend-mode: normal;
+  filter: none;
+  opacity: 1;
+}
+
+.gallery .fallback figcaption,
+.slot figcaption {
+  flex-shrink: 0;
+  flex: 0 0 auto;
+  font-family: var(--serif);
+  font-size: clamp(10px, 2.2vmin, 14px);
+  line-height: 1;
+  letter-spacing: 0.18em;
+  color: var(--quiet);
+  margin: 0;
+  padding: 0;
+}
+
+/* Anki missing-image chrome must not steal the 50/50 gallery. */
+.missing-image,
+img.missing-image,
+.gallery .missing-image,
+.gallery [class*="missing-image"],
+.slot .missing-image {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  overflow: hidden !important;
+  border: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+.han,
+.han.printed,
+.han.printed.solo,
+.han.cursive {
+  color: #1c1a17 !important;
+  -webkit-text-fill-color: #1c1a17 !important;
+}
+
+.nightMode,
+.night_mode,
+html.nightMode,
+body.nightMode,
+.card.nightMode,
+.night_mode.card {
+  --paper: #f4ecd8;
+  --ink: #1c1a17;
+  --quiet: #6f675c;
+  --rule: #c9c0ac;
+}
+
+.nightMode,
+.night_mode,
+.nightMode .card,
+.night_mode .card,
+.card.nightMode,
+.card.night_mode,
+.nightMode #qa,
+.night_mode #qa {
+  background: var(--paper);
+  background-color: var(--paper);
+  color: var(--ink);
+}
+
+html.nightMode,
+body.nightMode,
+html.night_mode,
+body.night_mode {
+  background: var(--paper);
+  background-color: var(--paper);
+  color: var(--ink);
+}
+
+.nightMode .han,
+.night_mode .han,
+.nightMode .han.printed,
+.night_mode .han.printed {
+  color: #1c1a17 !important;
+  -webkit-text-fill-color: #1c1a17 !important;
+}
+
+.nightMode .slot img,
+.night_mode .slot img,
+.nightMode .card .slot img,
+.night_mode .card .slot img,
+.slot img {
+  filter: none !important;
+  -webkit-filter: none !important;
+  mix-blend-mode: normal !important;
+  opacity: 1 !important;
+}
+
+/* all-writings gallery */
+.leaf.back .gallery.multi{display:flex;flex-wrap:wrap;align-content:flex-start;justify-content:center;overflow-y:auto;-webkit-overflow-scrolling:touch;gap:6px;padding:2vmin}
+.gallery.multi .slot{flex:0 0 auto;height:auto;width:auto;container-type:normal;overflow:visible}
+.gallery.multi .slot img{height:22vmin;max-height:none;max-width:none}
+.gallery.multi .slot figcaption{font-size:11px}
+
+
+/* Representative glyph on an image front. The printed character uses .han.printed.solo. */
+.solo-img {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.solo-img img {
+  display: block;
+  width: auto;
+  height: auto;
+  max-width: 86%;
+  max-height: 72%;
+  object-fit: contain;
+}
+
+.variant-srcs {
+  display: none !important;
+}

@@ -1,16 +1,18 @@
 """Build an Anki package from plate images and boxes.json.
 
-One note per character. Each kept box becomes a JPEG in the package media
-map; note fields reference it with ``<img src="name.jpg">``. ``repeatMark``
-and ``noCard`` boxes are skipped. Deck, model, and note ids depend only on
-the deck name and the character, so importing the same deck again updates
-existing notes.
+One note per character. Note fields are data (character, ``<img>`` tags,
+captions, count). Card layout lives in ``cba/anki_templates`` or a directory
+passed as ``--template-dir``. ``repeatMark`` and ``noCard`` boxes are skipped.
+The deck id comes from the deck name. The model id comes from the deck name
+and the template set name. The note GUID comes from the deck name and the
+character, so importing the same deck again updates existing notes.
 """
 
 from __future__ import annotations
 
 import hashlib
 import html
+import json
 import re
 import tempfile
 from dataclasses import dataclass
@@ -24,15 +26,13 @@ PACKAGE_TIMESTAMP = 1_704_067_200.0
 _ID_SPACE = 2_000_000_000
 _CAPTION_DOT = "\u00b7"
 _SAFE_NAME = re.compile(r"[^A-Za-z0-9._-]+")
-
-_CSS = """
-.card { font-family: serif; text-align: center; color: #1c1c1c; background: #f6f3ec; }
-.glyph-char { font-size: 64px; line-height: 1.3; margin: 0.2em 0 0.4em; }
-.variants { text-align: center; }
-figure { display: inline-block; vertical-align: top; margin: 8px; }
-figure img, .card img { max-width: 100%; height: auto; background: #fff; }
-figcaption { font-family: sans-serif; font-size: 14px; color: #555; margin-top: 4px; }
-""".strip()
+NOTE_FIELDS = ("Char", "Image", "Variants", "Sources", "Count")
+_ANKI_SPECIAL = {"FrontSide", "Tags", "Type", "Deck", "Card", "Subdeck", "CardFlag"}
+_TAG = re.compile(r"\{\{([^{}]+)\}\}")
+_TAG_PARTS = re.compile(
+    r"^\s*([#/^])?\s*(?:(text|hint|type|furigana|kana|kanji):)?\s*([A-Za-z][A-Za-z0-9_]*)\s*$"
+)
+_FIELD_NAME = re.compile(r"^[A-Za-z][A-Za-z0-9_]*$")
 
 
 class DeckError(Exception):
@@ -55,8 +55,9 @@ def deck_id_for(deck_name: str) -> int:
     return stable_id(f"cba\x1fdeck\x1f{deck_name}")
 
 
-def model_id_for(deck_name: str) -> int:
-    model = stable_id(f"cba\x1fmodel\x1f{deck_name}")
+def model_id_for(deck_name: str, template_name: str = "default") -> int:
+    """Model id for one deck and one template set. ``--front`` is not part of it."""
+    model = stable_id(f"cba\x1fmodel\x1f{deck_name}\x1f{template_name}")
     deck = deck_id_for(deck_name)
     if model != deck:
         return model
@@ -121,38 +122,190 @@ def _to_rgb(image):
     return image.convert("RGB")
 
 
+def default_template_dir() -> Path:
+    """Bundled card templates, next to this module in a checkout or an install."""
+    return Path(__file__).resolve().parent / "anki_templates" / "default"
+
+
+@dataclass(frozen=True)
+class CardTemplate:
+    set_id: str
+    model_name: str
+    card_name: str
+    fields: tuple[str, ...]
+    front_html: str
+    back_html: str
+    css: str
+    front: str
+
+
+def _read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8-sig")
+    except OSError as exc:
+        raise DeckError(f"cannot read template file {path.name}: {exc}", code="template") from exc
+
+
 def _caption(plate: str, ti: int | None) -> str:
     if ti is None:
         return plate
     return f"{plate}{_CAPTION_DOT}{ti}"
 
 
-def _figure(filename: str, plate: str, ti: int | None, char: str) -> str:
-    src = html.escape(filename, quote=True)
-    alt = html.escape(char, quote=True)
-    caption = html.escape(_caption(plate, ti), quote=True)
-    return f'<figure><img src="{src}" alt="{alt}"><figcaption>{caption}</figcaption></figure>'
-
-
-def _char_html(char: str) -> str:
-    return f'<div class="glyph-char">{html.escape(char)}</div>'
-
-
-def _front_html(char: str, named: list[tuple[object, str]], front: str) -> str:
-    if front == "char":
-        return _char_html(char)
-    filename = named[0][1]
+def _img_tag(filename: str, char: str) -> str:
     src = html.escape(filename, quote=True)
     alt = html.escape(char, quote=True)
     return f'<img src="{src}" alt="{alt}">'
 
 
-def _back_html(char: str, named: list[tuple[object, str]], front: str) -> str:
-    figures = "".join(_figure(filename, item.plate, item.ti, char) for item, filename in named)
-    variants = f'<div class="variants">{figures}</div>'
-    if front == "image":
-        return _char_html(char) + variants
-    return variants
+def referenced_fields(*parts: str) -> set[str]:
+    """Field names used by Anki template tags. Special names such as FrontSide are omitted."""
+    found: set[str] = set()
+    for part in parts:
+        for raw in _TAG.findall(part):
+            match = _TAG_PARTS.match(raw)
+            if match is None:
+                raise DeckError(
+                    f"unrecognized template tag {{{{{raw.strip()}}}}}",
+                    code="template",
+                )
+            name = match.group(3)
+            if name not in _ANKI_SPECIAL:
+                found.add(name)
+    return found
+
+
+def _validate_references(label: str, text: str, fields: tuple[str, ...]) -> None:
+    try:
+        used = referenced_fields(text)
+    except DeckError as exc:
+        raise DeckError(f"{label}: {exc}", code="template", **exc.extra) from exc
+    unknown = sorted(name for name in used if name not in fields)
+    if unknown:
+        names = ", ".join(unknown)
+        allowed = ", ".join(fields) if fields else "(none)"
+        raise DeckError(
+            f"{label} references unknown field(s): {names}; fields are {allowed}",
+            code="template",
+            unknown=unknown,
+            file=label,
+        )
+
+
+def load_template(directory: Path | None, front: str) -> CardTemplate:
+    """Load ``front.html`` / ``front-char.html``, ``back.html``, ``style.css``, and optional ``template.json``."""
+    if front not in ("image", "char"):
+        raise DeckError("front must be image or char")
+    folder = default_template_dir() if directory is None else Path(directory)
+    if not folder.is_dir():
+        raise DeckError(f"template directory not found: {folder.name}", code="template")
+
+    meta: dict = {}
+    spec_path = folder / "template.json"
+    if spec_path.is_file():
+        try:
+            parsed = json.loads(_read_text(spec_path))
+        except json.JSONDecodeError as exc:
+            raise DeckError(f"invalid template.json: {exc}", code="template") from exc
+        if not isinstance(parsed, dict):
+            raise DeckError("template.json must be an object", code="template")
+        meta = parsed
+
+    set_id = meta.get("id")
+    if set_id in (None, ""):
+        set_id = folder.name
+    if not isinstance(set_id, str) or not set_id.strip() or any(ch in set_id for ch in "\r\n\x00"):
+        raise DeckError("template id must be a non-empty single-line string", code="template")
+    set_id = set_id.strip()
+
+    model_name = meta.get("name")
+    if model_name in (None, ""):
+        model_name = "cba glyphs" if set_id == "default" else set_id
+    if not isinstance(model_name, str) or not model_name.strip() or any(ch in model_name for ch in "\r\n\x00"):
+        raise DeckError("template name must be a non-empty single-line string", code="template")
+    model_name = model_name.strip()
+
+    card_name = meta.get("card") or "Glyph"
+    if not isinstance(card_name, str) or not card_name.strip():
+        raise DeckError("template card name must be a non-empty string", code="template")
+
+    if "fields" in meta and meta["fields"] not in (None, ""):
+        raw_fields = meta["fields"]
+        if not isinstance(raw_fields, list) or not raw_fields:
+            raise DeckError("template fields must be a non-empty list", code="template")
+        fields_list: list[str] = []
+        for item in raw_fields:
+            if not isinstance(item, str) or not _FIELD_NAME.fullmatch(item):
+                raise DeckError(f"invalid template field name: {item!r}", code="template")
+            if item in fields_list:
+                raise DeckError(f"duplicate template field: {item}", code="template")
+            fields_list.append(item)
+        fields = tuple(fields_list)
+    else:
+        fields = NOTE_FIELDS
+    unknown_fields = [name for name in fields if name not in NOTE_FIELDS]
+    if unknown_fields:
+        names = ", ".join(unknown_fields)
+        allowed = ", ".join(NOTE_FIELDS)
+        raise DeckError(
+            f"template field(s) not produced by cba anki: {names}; available fields are {allowed}",
+            code="template",
+            unknown=unknown_fields,
+        )
+
+    fronts = meta.get("fronts") or {"image": "front.html", "char": "front-char.html"}
+    if not isinstance(fronts, dict):
+        raise DeckError("template fronts must be an object", code="template")
+    front_file = fronts.get(front) or ("front.html" if front == "image" else "front-char.html")
+    if not isinstance(front_file, str) or not front_file.strip() or Path(front_file).name != front_file:
+        raise DeckError(f"template front for {front} must be a file name in the template directory", code="template")
+    back_file = meta.get("back") or "back.html"
+    css_file = meta.get("css") or "style.css"
+    for label, filename in (("back", back_file), ("css", css_file)):
+        if not isinstance(filename, str) or not filename.strip() or Path(filename).name != filename:
+            raise DeckError(f"template {label} must be a file name in the template directory", code="template")
+
+    front_path = folder / front_file
+    back_path = folder / back_file
+    css_path = folder / css_file
+    missing = [path.name for path in (front_path, back_path, css_path) if not path.is_file()]
+    if missing:
+        raise DeckError(
+            f"template is missing {', '.join(missing)} (front {front} uses {front_file})",
+            code="template",
+            missing=missing,
+        )
+    front_html = _read_text(front_path).strip()
+    back_html = _read_text(back_path).strip()
+    css = _read_text(css_path).strip()
+    if not front_html:
+        raise DeckError(f"{front_file} is empty", code="template")
+    if not back_html:
+        raise DeckError(f"{back_file} is empty", code="template")
+    _validate_references(front_file, front_html, fields)
+    _validate_references(back_file, back_html, fields)
+    return CardTemplate(
+        set_id=set_id,
+        model_name=model_name,
+        card_name=card_name.strip(),
+        fields=fields,
+        front_html=front_html,
+        back_html=back_html,
+        css=css,
+        front=front,
+    )
+
+
+def _note_values(char: str, named: list[tuple[object, str]]) -> dict[str, str]:
+    images = [_img_tag(filename, char) for _item, filename in named]
+    sources = [html.escape(_caption(item.plate, item.ti)) for item, _filename in named]
+    return {
+        "Char": html.escape(char),
+        "Image": images[0],
+        "Variants": "\n".join(images),
+        "Sources": "\n".join(sources),
+        "Count": str(len(named)),
+    }
 
 
 def _media_name(plate: str, box_id: int, ti: int | None, used: set[str]) -> str:
@@ -246,22 +399,22 @@ def _classify(plates: list[tuple[str, Path]], document: dict) -> tuple[list[_Kep
     return kept, counts
 
 
-def _model(deck_name: str):
+def _model(deck_name: str, template: CardTemplate):
     import genanki
 
     return genanki.Model(
-        model_id_for(deck_name),
-        f"{deck_name} glyphs",
-        fields=[{"name": "Character"}, {"name": "Front"}, {"name": "Back"}],
+        model_id_for(deck_name, template.set_id),
+        template.model_name,
+        fields=[{"name": name} for name in template.fields],
         templates=[
             {
-                "name": "Glyph",
-                "qfmt": "{{Front}}",
-                "afmt": '{{FrontSide}}<hr id="answer">{{Back}}',
+                "name": template.card_name,
+                "qfmt": template.front_html,
+                "afmt": template.back_html,
             }
         ],
-        css=_CSS,
-        sort_field_index=0,
+        css=template.css,
+        sort_field_index=template.fields.index("Char") if "Char" in template.fields else 0,
     )
 
 
@@ -275,6 +428,7 @@ def build_apkg(
     deck_name: str,
     out_path: Path,
     front: str = "image",
+    template_dir: Path | None = None,
 ) -> dict:
     """Write one ``.apkg``. Raises ``DeckError`` when there is nothing to card."""
     from boxannotator import ensure_outside_package
@@ -282,8 +436,7 @@ def build_apkg(
     name = deck_name.strip()
     if not name or any(ch in name for ch in "\r\n\x00"):
         raise DeckError("deck name must be a non-empty single-line name")
-    if front not in ("image", "char"):
-        raise DeckError("front must be image or char")
+    template = load_template(template_dir, front)
     out_path = Path(out_path)
     if out_path.exists() and out_path.is_dir():
         raise DeckError("output path is a directory")
@@ -358,7 +511,7 @@ def build_apkg(
                 **counts,
             )
 
-        model = _model(name)
+        model = _model(name, template)
         deck = genanki.Deck(
             deck_id_for(name),
             name,
@@ -366,7 +519,8 @@ def build_apkg(
         )
         media_paths: list[str] = []
         for char, named in notes:
-            fields = [char, _front_html(char, named, front), _back_html(char, named, front)]
+            values = _note_values(char, named)
+            fields = [values[field_name] for field_name in template.fields]
             note = genanki.Note(model=model, fields=fields, guid=note_guid(name, char))
             deck.add_note(note)
             for _item, filename in named:
@@ -387,6 +541,7 @@ def build_apkg(
     return {
         "deck": name,
         "front": front,
+        "template": template.set_id,
         "notes": len(notes),
         "media": len(media_paths),
         "skippedRepeat": counts["skippedRepeat"],
@@ -395,5 +550,5 @@ def build_apkg(
         "missingPlates": counts["missingPlates"],
         "bytes": out_path.stat().st_size,
         "deckId": deck_id_for(name),
-        "modelId": model_id_for(name),
+        "modelId": model_id_for(name, template.set_id),
     }

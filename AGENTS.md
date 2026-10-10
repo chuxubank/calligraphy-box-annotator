@@ -19,7 +19,7 @@
 6. **能确定就写 spec，然后应用。** `python -m cba apply-spec --spec <文件> --label fix-1 --json`。它会先备份成 `boxes.json.pre_<label>`，再替换点名的列。然后重新 `export-column`（或 `python -m cba contact-sheet --json`）再看一遍。确认无误后：`python -m cba review --plate <图版> --col <列号> --reviewed --json`。
 7. **不能确定就升级，不要猜字。** `python -m cba review --plate <图版> --col <列号> --unresolved --note "原因" --json`。原因写给人看，例如墨迹不够、顶边是空白、补纸上只剩几个字。
 8. **交给人的清单**就是 `status --json` 里的 `unresolved`。另外跑 `python -m cba validate --json`。有问题且该列不是 `approved` 时，用 spec 修，或标 unresolved。`approved` 列即使校验报错也不要改框，把问题写进 unresolved 的 note 即可。
-9. **导出牌组。** 框定稿之后：`python -m cba anki --deck-name <名字> --out deck.apkg --json`。一个字一张笔记，背面是这个字的全部写法，图注是 `图版·ti`。跳过 `repeatMark` 和 `noCard`。图是 JPEG 媒体文件（`<img src="文件名.jpg">`），不要嵌 base64。牌组 id 和模板 id 由牌组名决定，笔记 GUID 由牌组名和字决定，同名再导入会更新原来的笔记。这一步不改 `boxes.json`。
+9. **导出牌组。** 框定稿之后：`python -m cba anki --deck-name <名字> --out deck.apkg --json`。一个字一张笔记。字段是 `Char`、`Image`、`Variants`、`Sources`、`Count`，版式在 `cba/anki_templates/default/`（或 `--template-dir`）。跳过 `repeatMark` 和 `noCard`。图是 JPEG 媒体文件（`<img src="文件名.jpg">`），不要嵌 base64。牌组 id 由牌组名决定，笔记模板 id 由牌组名和模板集 `id` 决定，笔记 GUID 由牌组名和字决定。同名再导入会更新原来的笔记。要改卡片样子就改模板文件，不要改 Python。这一步不改 `boxes.json`。
 
 中断之后从第 2 步继续。进度在配置的 boxes 路径旁边：`boxes.json` 对应 `boxes.review.json`。`reviewed` 的列不要重看，除非后来的 `validate` 指出它有问题。牌组是最后一步，不参与断点。
 
@@ -36,7 +36,7 @@
 | `validate` | 检查 `boxes.json`。有问题则退出码为 1 |
 | `review --plate ID --col N --reviewed\|--unresolved\|--clear` | 写审阅 sidecar。`--unresolved` 必须带 `--note`。不会改 `approved` |
 | `cut --plate ID --per-column N` | 按墨迹提议框，不落盘 |
-| `anki --deck-name 名字 --out 文件.apkg` | 一个字一张 Anki 笔记。默认正面是一张字形，背面是字和全部写法（图注 `图版·ti`）。跳过重文点和不制卡。`--front char` 时正面是字。图片是媒体文件 |
+| `anki --deck-name 名字 --out 文件.apkg` | 一个字一张 Anki 笔记。字段是字、代表字形、全部 `<img>`、`图版·ti`、个数；版式在模板目录。`--front char` 用 `front-char.html`。`--template-dir` 换一套模板。跳过重文点和不制卡 |
 | `serve --data-dir 目录 --port 端口` | 打开标注网页。`boxes.json` 写在数据目录，不写进安装包 |
 
 `validate` 的 `issues[].code`：
@@ -120,4 +120,4 @@
 
 ## English
 
-Run `python -m cba` from the repo root, or install the `cba` command with `uv tool install .` / `uv tool install git+https://github.com/AsahiArt/calligraphy-box-annotator`. A one-off run is `uvx --from git+https://github.com/AsahiArt/calligraphy-box-annotator cba`. The agent uses its own vision on `export-column` PNGs; this repo makes no model calls and needs no API key. Loop: `status` → export each unreviewed column → compare with `docs/CURSIVE_RULES.md` → write a spec → `apply-spec` → export again → `review --reviewed`, or `review --unresolved --note` when the column cannot be decided. `approved` columns and boxes are never rewritten (`apply-spec` exits non-zero and leaves the file unchanged). Resume from `boxes.review.json` via `status`. The last step is `cba anki`: one note per character, JPEG crops stored as Anki media files, `repeatMark` and `noCard` skipped. Deck and model ids come from `--deck-name`; note GUIDs come from that name and the character. It does not modify `boxes.json`. `cba serve --data-dir <dir> --port 8765` launches the annotator; writes stay in that directory (or the current directory), never in the installed package. Demo plates are synthetic; do not add museum images.
+Run `python -m cba` from the repo root, or install the `cba` command with `uv tool install .` / `uv tool install git+https://github.com/AsahiArt/calligraphy-box-annotator`. A one-off run is `uvx --from git+https://github.com/AsahiArt/calligraphy-box-annotator cba`. The agent uses its own vision on `export-column` PNGs; this repo makes no model calls and needs no API key. Loop: `status` → export each unreviewed column → compare with `docs/CURSIVE_RULES.md` → write a spec → `apply-spec` → export again → `review --reviewed`, or `review --unresolved --note` when the column cannot be decided. `approved` columns and boxes are never rewritten (`apply-spec` exits non-zero and leaves the file unchanged). Resume from `boxes.review.json` via `status`. The last step is `cba anki`: one note per character, JPEG crops stored as Anki media files, `repeatMark` and `noCard` skipped. Note fields are `Char`, `Image`, `Variants`, `Sources`, and `Count`. Card HTML and CSS live in `cba/anki_templates/default/` (or `--template-dir`); a `{{Field}}` that is not in that set's field list is an error. The deck id comes from `--deck-name`. The model id comes from that name plus the template set id. Note GUIDs come from the deck name and the character. It does not modify `boxes.json`. Change the card look by editing the template files, not the Python. `cba serve --data-dir <dir> --port 8765` launches the annotator; writes stay in that directory (or the current directory), never in the installed package. Demo plates are synthetic; do not add museum images.

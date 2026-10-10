@@ -22,9 +22,12 @@ from cba.anki import (  # noqa: E402
     JPEG_QUALITY,
     MAX_SIDE,
     PAD_PX,
+    DeckError,
     build_apkg,
     crop_glyph,
     deck_id_for,
+    default_template_dir,
+    load_template,
     model_id_for,
     note_guid,
 )
@@ -86,7 +89,9 @@ class IdTests(unittest.TestCase):
     def test_ids_depend_only_on_the_deck_name_and_character(self) -> None:
         self.assertEqual(deck_id_for("calligraphy"), deck_id_for("calligraphy"))
         self.assertNotEqual(deck_id_for("calligraphy"), deck_id_for("other"))
-        self.assertNotEqual(deck_id_for("calligraphy"), model_id_for("calligraphy"))
+        self.assertEqual(model_id_for("calligraphy"), model_id_for("calligraphy", "default"))
+        self.assertNotEqual(model_id_for("calligraphy", "default"), model_id_for("calligraphy", "plain"))
+        self.assertNotEqual(deck_id_for("calligraphy"), model_id_for("calligraphy", "default"))
         for name in ("calligraphy", "书谱", "a"):
             for value in (deck_id_for(name), model_id_for(name)):
                 self.assertIsInstance(value, int)
@@ -174,17 +179,21 @@ class PackageTests(EnvGuard):
             note = package["notes"][0]
             self.assertEqual(note["guid"], note_guid("group", "甲"))
             self.assertEqual(note["sort"], "甲")
-            character, front, back = note["fields"]
-            self.assertEqual(character, "甲")
-            self.assertEqual(front.count("<img "), 1)
-            self.assertNotIn("乙", front + back)
-            self.assertNotIn("丙", front + back)
-            self.assertIn("甲", back)
-            self.assertEqual(back.count("<img "), 2)
-            self.assertIn("plate-a\u00b70", back)
-            self.assertIn("plate-a\u00b71", back)
-            self.assertIn("<figure>", back)
-            self.assertIn("<figcaption>", back)
+            char, image, variants, sources, count = note["fields"]
+            self.assertEqual(char, "甲")
+            self.assertEqual(image.count("<img "), 1)
+            self.assertEqual(variants.count("<img "), 2)
+            self.assertNotIn("<figure>", "\n".join(note["fields"]))
+            self.assertNotIn("乙", char + image + variants + sources)
+            self.assertNotIn("丙", char + image + variants + sources)
+            self.assertIn("plate-a\u00b70", sources)
+            self.assertIn("plate-a\u00b71", sources)
+            self.assertEqual(count, "2")
+            model = package["models"][str(summary["modelId"])]
+            self.assertIn("{{Image}}", model["tmpls"][0]["qfmt"])
+            self.assertIn("{{Variants}}", model["tmpls"][0]["afmt"])
+            self.assertIn("--paper: #f4ecd8", model["css"])
+            self.assertEqual([field["name"] for field in model["flds"]], ["Char", "Image", "Variants", "Sources", "Count"])
             srcs = []
             for field in note["fields"]:
                 self.assertNotIn("data:image", field)
@@ -219,11 +228,13 @@ class PackageTests(EnvGuard):
             first = [_box(1, 10, 10, 40, 40, "甲", 0)]
             out1, summary1 = self._build(folder, first, deck_name="stable", front="char", color=(1, 2, 3))
             original = read_apkg(out1)
-            character, front, back = original["notes"][0]["fields"]
-            self.assertEqual(character, "甲")
-            self.assertNotIn("<img ", front)
-            self.assertIn("<img ", back)
-            self.assertIn("plate-a\u00b70", back)
+            fields = original["notes"][0]["fields"]
+            self.assertEqual(fields[0], "甲")
+            self.assertIn("<img ", fields[1])
+            self.assertIn("plate-a\u00b70", fields[3])
+            char_model = original["models"][str(summary1["modelId"])]
+            self.assertIn("{{Char}}", char_model["tmpls"][0]["qfmt"])
+            self.assertNotIn("{{Image}}", char_model["tmpls"][0]["qfmt"])
             second = [
                 _box(1, 10, 10, 40, 40, "甲", 0),
                 _box(2, 10, 80, 40, 40, "甲", 1),
@@ -236,6 +247,7 @@ class PackageTests(EnvGuard):
             self.assertEqual(package["notes"][0]["guid"], note_guid("stable", "甲"))
             self.assertEqual(package["notes"][0]["fields"][1].count("<img "), 1)
             self.assertEqual(package["notes"][0]["fields"][2].count("<img "), 2)
+            self.assertIn("{{Image}}", package["models"][str(summary2["modelId"])]["tmpls"][0]["qfmt"])
             self.assertNotEqual(note_guid("stable", "甲"), note_guid("other-deck", "甲"))
 
     def test_wide_crop_is_resized_and_cjk_plate_names_stay_ascii(self) -> None:
@@ -254,8 +266,7 @@ class PackageTests(EnvGuard):
             filename = next(iter(package["media"].values()))
             self.assertRegex(filename, r"^[A-Za-z0-9._-]+\.jpg$")
             self.assertNotIn("甲", filename)
-            _character, _front, back = package["notes"][0]["fields"]
-            self.assertIn("甲卷\u00b73", back)
+            self.assertIn("甲卷\u00b73", package["notes"][0]["fields"][3])
             blob = next(iter(package["blobs"].values()))
             with Image.open(io.BytesIO(blob)) as glyph:
                 self.assertEqual(glyph.size[0], MAX_SIDE)
@@ -275,6 +286,7 @@ class DemoAnkiTests(EnvGuard):
         self.assertIn("--out", out)
         self.assertIn("--data-dir", out)
         self.assertIn("--json", out)
+        self.assertIn("--template-dir", out)
         text = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
         self.assertIn("genanki", text.lower())
         requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8").lower()
@@ -290,6 +302,7 @@ class DemoAnkiTests(EnvGuard):
             payload = json.loads(out)
             self.assertEqual(payload["deck"], "calligraphy")
             self.assertEqual(payload["front"], "image")
+            self.assertEqual(payload["template"], "default")
             self.assertEqual(payload["out"], "calligraphy.apkg")
             self.assertEqual(payload["notes"], 6)
             self.assertEqual(payload["media"], 6)
@@ -396,10 +409,128 @@ class DemoAnkiTests(EnvGuard):
             self.assertEqual(code, 0, err)
             package = read_apkg(Path(tmp) / "chars.apkg")
             jia = next(note for note in package["notes"] if note["sort"] == "甲")
-            self.assertIn("甲", jia["fields"][1])
-            self.assertNotIn("<img ", jia["fields"][1])
-            self.assertIn("<img ", jia["fields"][2])
-            self.assertIn("plate-01\u00b70", jia["fields"][2])
+            self.assertEqual(jia["fields"][0], "甲")
+            self.assertIn("<img ", jia["fields"][1])
+            self.assertIn("plate-01\u00b70", jia["fields"][3])
+            model = next(iter(package["models"].values()))
+            self.assertIn("{{Char}}", model["tmpls"][0]["qfmt"])
+            self.assertNotIn("{{Image}}", model["tmpls"][0]["qfmt"])
+            self.assertNotIn("data:image", "".join(jia["fields"]))
             payload = json.loads(out)
             self.assertEqual(payload["front"], "char")
+            self.assertEqual(payload["template"], "default")
             self.assertEqual(payload["notes"], 6)
+
+
+def _write_template(folder: Path, *, front: str, back: str, css: str, spec: dict | None) -> None:
+    folder.mkdir(parents=True, exist_ok=True)
+    (folder / "front.html").write_text(front, encoding="utf-8")
+    (folder / "back.html").write_text(back, encoding="utf-8")
+    (folder / "style.css").write_text(css, encoding="utf-8")
+    if spec is not None:
+        (folder / "template.json").write_text(json.dumps(spec), encoding="utf-8")
+
+
+class TemplateTests(EnvGuard):
+    def test_bundled_template_is_the_paper_card(self) -> None:
+        folder = default_template_dir()
+        self.assertTrue((folder / "front.html").is_file())
+        self.assertTrue((folder / "front-char.html").is_file())
+        self.assertTrue((folder / "back.html").is_file())
+        self.assertTrue((folder / "style.css").is_file())
+        image = load_template(None, "image")
+        char = load_template(None, "char")
+        self.assertEqual(image.set_id, "default")
+        self.assertEqual(image.fields, ("Char", "Image", "Variants", "Sources", "Count"))
+        self.assertIn("{{Image}}", image.front_html)
+        self.assertIn("{{Char}}", char.front_html)
+        self.assertNotIn("{{Image}}", char.front_html)
+        self.assertIn("--paper: #f4ecd8", image.css)
+        self.assertNotIn("data:image", image.front_html + image.back_html + image.css)
+        self.assertNotIn("米芾", image.front_html + image.back_html + char.front_html)
+
+    def test_custom_template_dir_and_unknown_field(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            custom = folder / "plain"
+            _write_template(
+                custom,
+                front='<div class="only">{{Char}}</div>',
+                back="<div>{{Image}}</div>",
+                css=".only { color: #123456; }",
+                spec={
+                    "id": "plain",
+                    "name": "Plain glyphs",
+                    "fields": ["Char", "Image"],
+                    "fronts": {"image": "front.html", "char": "front.html"},
+                },
+            )
+            image = folder / "plate-a.png"
+            image.write_bytes(_png((80, 80), [(10, 10, 30, 30, (0, 0, 0))]))
+            document = {"plates": {"plate-a": [_box(1, 10, 10, 30, 30, "甲", 0)]}}
+            out = folder / "custom.apkg"
+            summary = build_apkg(
+                [("plate-a", image)],
+                document,
+                "glyphs",
+                out,
+                front="image",
+                template_dir=custom,
+            )
+            self.assertEqual(summary["template"], "plain")
+            self.assertEqual(summary["modelId"], model_id_for("glyphs", "plain"))
+            self.assertNotEqual(summary["modelId"], model_id_for("glyphs", "default"))
+            package = read_apkg(out)
+            note = package["notes"][0]
+            self.assertEqual(note["guid"], note_guid("glyphs", "甲"))
+            self.assertEqual(note["fields"], ["甲", note["fields"][1]])
+            self.assertIn("<img ", note["fields"][1])
+            self.assertNotIn("data:image", "".join(note["fields"]))
+            model = package["models"][str(summary["modelId"])]
+            self.assertEqual(model["name"], "Plain glyphs")
+            self.assertEqual(model["tmpls"][0]["qfmt"], '<div class="only">{{Char}}</div>')
+            self.assertIn("#123456", model["css"])
+            self.assertEqual([field["name"] for field in model["flds"]], ["Char", "Image"])
+
+            broken = folder / "broken"
+            _write_template(
+                broken,
+                front="{{Char}} {{Nope}}",
+                back="{{Image}}",
+                css=".card {}",
+                spec={"id": "broken", "fields": ["Char", "Image"]},
+            )
+            with self.assertRaises(DeckError) as raised:
+                load_template(broken, "image")
+            self.assertIn("Nope", str(raised.exception))
+            self.assertIn("front.html", str(raised.exception))
+            self.assertEqual(raised.exception.extra.get("code"), "template")
+
+            boxes = folder / "boxes.json"
+            boxes.write_text(json.dumps(document), encoding="utf-8")
+            code, out_text, _err = run(
+                [
+                    "anki",
+                    "--json",
+                    "--deck-name",
+                    "glyphs",
+                    "--boxes",
+                    str(boxes),
+                    "--plates-dir",
+                    str(folder),
+                    "--plate-glob",
+                    "*.png",
+                    "--template-dir",
+                    str(broken),
+                    "--out",
+                    str(folder / "nope.apkg"),
+                ]
+            )
+            self.assertEqual(code, 1, out_text)
+            payload = json.loads(out_text)
+            self.assertFalse(payload["ok"])
+            self.assertEqual(payload["code"], "template")
+            self.assertIn("Nope", payload["error"])
+            self.assertIn("front.html", payload["error"])
+            self.assertFalse((folder / "nope.apkg").exists())
+            self.assertNotIn("data:image", out_text)

@@ -741,8 +741,20 @@ def cmd_anki(args: argparse.Namespace) -> int:
             out_path = out_path.with_name(out_path.name + ".apkg")
     else:
         out_path = _data_dir(args) / deck_filename(deck_name)
+    template_dir = None
+    if args.template_dir:
+        template_dir = _resolve_user_path(args.template_dir, _data_dir(args))
+        if not template_dir.is_dir():
+            raise CliError(f"template directory not found: {display_path(template_dir)}")
     try:
-        summary = build_apkg(ctx.plates, ctx.document, deck_name, out_path, front=front)
+        summary = build_apkg(
+            ctx.plates,
+            ctx.document,
+            deck_name,
+            out_path,
+            front=front,
+            template_dir=template_dir,
+        )
     except DeckError as exc:
         return fail(str(exc), args.json, **exc.extra)
     except OSError as exc:
@@ -751,7 +763,7 @@ def cmd_anki(args: argparse.Namespace) -> int:
     payload.update(summary)
     text = (
         f"wrote {payload['out']}\n"
-        f"deck {summary['deck']}  front {summary['front']}  "
+        f"deck {summary['deck']}  front {summary['front']}  template {summary['template']}  "
         f"notes {summary['notes']}  media {summary['media']}  "
         f"skipped repeat {summary['skippedRepeat']}  noCard {summary['skippedNoCard']}  "
         f"{summary['bytes']} bytes"
@@ -854,7 +866,7 @@ def build_parser() -> argparse.ArgumentParser:
     anki.add_argument(
         "--deck-name",
         default="calligraphy",
-        help="deck name; also seeds stable deck, model, and note ids (default: calligraphy)",
+        help="deck name; seeds the deck id and, with the template set, the model id (default: calligraphy)",
     )
     anki.add_argument(
         "--out",
@@ -864,7 +876,11 @@ def build_parser() -> argparse.ArgumentParser:
         "--front",
         choices=("image", "char"),
         default="image",
-        help="card front: one glyph image (default) or the character; the back lists every variant",
+        help="which front file to use: front.html (image, default) or front-char.html (character)",
+    )
+    anki.add_argument(
+        "--template-dir",
+        help="card template directory (front.html, front-char.html, back.html, style.css, optional template.json)",
     )
 
     serve = sub.add_parser("serve", help="launch the annotator web UI")

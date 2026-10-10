@@ -204,14 +204,25 @@ cba anki --deck-name glyphs --out glyphs.apkg --front char
 
 | 选项 | 作用 |
 | --- | --- |
-| `--deck-name` | 牌组名，默认 `calligraphy`。牌组 id 和笔记模板 id 由这个名字决定；每张笔记的 GUID 由牌组名和字一起决定。同名再导入会更新原笔记，不会复制出新卡 |
+| `--deck-name` | 牌组名，默认 `calligraphy`。牌组 id 由这个名字决定。笔记 GUID 由牌组名和字一起决定。同名再导入会更新原笔记，不会复制出新卡 |
 | `--out` | 输出的 `.apkg`。默认是数据目录里的 `<牌组名>.apkg` |
-| `--front image` | 默认。正面是其中一个字形，背面是这个字加上全部写法 |
-| `--front char` | 正面是字，背面是全部写法 |
+| `--front image` | 默认。用模板里的 `front.html`：正面是其中一个字形 |
+| `--front char` | 用 `front-char.html`：正面是字 |
+| `--template-dir` | 换一套卡片模板。不改代码 |
 | `--data-dir` | 和别的子命令一样，读这里的 `boxes.json` 和图版，并把牌组写到这里 |
 | `--json` | 打印笔记数、媒体文件数、跳过的重文点和不制卡数，以及 `.apkg` 的字节数 |
 
-每张图是 JPEG（质量约 85，最长边约 400 像素，框外留 8 像素）。图放进牌组的媒体文件，笔记里只写 `<img src="文件名.jpg">`，不把图嵌成 base64，也不写本机绝对路径。
+笔记字段是数据，不是排好的卡片：`Char`（字）、`Image`（代表字形的 `<img>`）、`Variants`（全部写法的 `<img>`）、`Sources`（一行一个 `图版·ti`）、`Count`（写法个数）。版式在模板里。
+
+每张图是 JPEG（质量约 85，最长边约 400 像素，框外留 8 像素）。图放进牌组的媒体文件，字段里只写 `<img src="文件名.jpg">`，不把图嵌成 base64，也不写本机绝对路径。
+
+默认模板在 `cba/anki_templates/default/`（`front.html`、`front-char.html`、`back.html`、`style.css`、`template.json`）。样子是一页暖纸色：正面居中一个字或一张字形，背面上面是这个字，下面是全部写法，图注来自 `Sources`。样式会先用牌组媒体里的 `_serif.otf` 和 `_caoshu.ttf`（文件名，不是本机路径），没有就退回系统宋体。模板 id 写在 `template.json` 的 `id` 里，和牌组名一起决定笔记模板 id。要改版式，复制这个目录，改 HTML 和 CSS，然后：
+
+```bash
+python -m cba anki --template-dir path/to/my-templates --out mine.apkg --json
+```
+
+`template.json` 里的 `fields` 必须是上面五个字段的子集。模板里的 `{{字段}}` 必须在这份列表中，否则命令会退出并写明是哪个文件、哪个字段。可选的 `id` 是模板集的名字；不写则用目录名。`--front` 选择 `fronts.image` 或 `fronts.char` 指向的文件。
 
 示例图版上，`乙` 是重文点，`戊` 和 `子` 是不制卡，所以 `python -m cba anki --json` 得到 6 张笔记、6 个媒体文件，并写出 `calligraphy.apkg`。
 
@@ -287,7 +298,7 @@ python crop_glyphs.py
 
 To drive the same steps from an agent, use `python -m cba` or the `cba` console script (status, export-column, apply-spec, contact-sheet, validate, anki, serve). The agent supplies its own vision; this repo never calls a model API. The workflow, spec format, and the rule against rewriting human-approved boxes are in [AGENTS.md](AGENTS.md).
 
-`cba anki` is the last step. It builds a generic deck from `boxes.json` and the plate images: one note per character, and the back lists every kept crop of that character with a `plate·ti` caption. `repeatMark` and `noCard` boxes are skipped. Glyphs are JPEG media files referenced by `<img src="name.jpg">`, not base64 and not a local file path. Deck and model ids come from `--deck-name`. Each note GUID comes from that name plus the character, so importing the same deck again updates notes. On the synthetic demo, `python -m cba anki --json` writes `calligraphy.apkg` (6 notes; the repeat mark and the two noCard boxes are omitted).
+`cba anki` is the last step. It builds a generic deck from `boxes.json` and the plate images: one note per character. Fields are `Char`, `Image` (one `<img>`), `Variants` (an `<img>` per form), `Sources` (one `plate·ti` caption per line), and `Count`. Layout is not rendered into those fields. It lives in `cba/anki_templates/default/` (`front.html`, `front-char.html`, `back.html`, `style.css`, `template.json`). `--front image` uses `front.html`; `--front char` uses `front-char.html`. Copy that directory and pass `--template-dir` to restyle the cards. `template.json` `fields` must be a subset of those five names, and every `{{Field}}` in the HTML must be in that list. The deck id comes from `--deck-name`. The model id comes from that name plus the template set `id` (the directory name when `id` is omitted). Each note GUID comes from the deck name and the character, so importing the same deck again updates notes. Glyphs are JPEG media files, not base64 and not a local file path. `repeatMark` and `noCard` boxes are skipped. On the synthetic demo, `python -m cba anki --json` writes `calligraphy.apkg` (6 notes; the repeat mark and the two noCard boxes are omitted).
 
 Install it with uv, then run it from any directory. Writes go to the current directory or `--data-dir`, and the installed package is read-only:
 

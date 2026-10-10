@@ -107,7 +107,7 @@ spec 的形状：
 
 ## 导出牌组
 
-列都看完、`validate` 没有还要改的问题之后，再打成牌组。`python -m cba anki` 读当前的 `boxes.json` 和图版，不改框。一个字一张笔记；背面是这个字的全部写法，图注 `图版·ti`。重文点和不制卡的框不进去。图是牌组里的 JPEG 媒体文件。`--deck-name` 不变时，再次导入会更新原来的笔记。
+列都看完、`validate` 没有还要改的问题之后，再打成牌组。`python -m cba anki` 读当前的 `boxes.json` 和图版，不改框。一个字一张笔记。字段是字、字形图、全部写法和 `图版·ti`；卡片长什么样由 `cba/anki_templates/default/` 或 `--template-dir` 决定。重文点和不制卡的框不进去。图是牌组里的 JPEG 媒体文件。`--deck-name` 和模板集 `id` 不变时，再次导入会更新原来的笔记。
 
 ```bash
 python -m cba anki --deck-name 书谱 --out deck.apkg --json
