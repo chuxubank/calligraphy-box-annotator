@@ -179,15 +179,29 @@ python tools/contact_sheet.py --lowconf examples/demo/lowconf.example.json --out
 python tools/apply_column_spec.py --spec path/to/spec.json --label fix-1
 ```
 
+## 给 AI 代理用
+
+看图的是代理自己的视觉。本仓库不调用模型 API，也不读取 API key。在仓库根目录按 [AGENTS.md](AGENTS.md) 操作：先看哪些列还没审，导出一列的图和释文，对照 [docs/CURSIVE_RULES.md](docs/CURSIVE_RULES.md)，把能确定的改动写成 spec 再写回，拿不准的列留给人。
+
+```bash
+python -m cba status --json
+python -m cba validate --json
+python -m cba export-column --plate plate-01 --col 1 --json
+```
+
+`status` 列出每张图版、每一列的框数，以及还没看过的列。审阅进度在 `boxes.json` 旁边的 `boxes.review.json`，中断后重新运行 `status` 即可继续。人标成 `approved` 的列不会被改写。
+
 ## 开发
 
 ```
 serve.py            本地 HTTP 服务
 crop_glyphs.py      按 boxes.json 裁切单字
 boxannotator.py     配置、图版发现、校验与裁切
+cba/                代理用命令行（python -m cba）
 tools/              列切分、对照表、spec 应用
 web/                页面、样式、前端逻辑
 docs/               逐列工作流和草书规则
+AGENTS.md           给编程代理的逐步说明
 examples/demo/      合成示例图、释文、示例框
 config.example.json 开箱即用的示例配置
 ```
@@ -216,6 +230,8 @@ python serve.py
 # http://127.0.0.1:8765/
 python crop_glyphs.py
 ```
+
+To drive the same steps from an agent, use `python -m cba` (status, export-column, apply-spec, contact-sheet, validate). The agent supplies its own vision; this repo never calls a model API. The workflow, spec format, and the rule against rewriting human-approved boxes are in [AGENTS.md](AGENTS.md).
 
 Python 3.10+ is enough to serve the UI (stdlib only). Pillow is required to crop glyphs, draw contact sheets, and regenerate the demo plates. If `config.json` is absent, `config.example.json` is used, so a fresh clone runs against the synthetic plates under `examples/demo/`. The first launch seeds `boxes.json` from `boxes.example.json` when that file sits beside it. Copy `config.example.json` to `config.json` to point at your own images. See the Chinese sections above for config fields, the HTTP API, and keyboard shortcuts. [docs/WORKFLOW.md](docs/WORKFLOW.md) and [docs/CURSIVE_RULES.md](docs/CURSIVE_RULES.md) record the per-column alignment workflow learned on the cursive scroll *Shupu*.
 

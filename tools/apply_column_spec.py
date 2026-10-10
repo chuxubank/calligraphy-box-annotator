@@ -10,6 +10,9 @@ A column entry replaces that column's boxes. Other columns are left alone.
 bottom. ``t0`` is the transcription index of the first glyph. ``repeat`` lists
 transcription indexes to flag as repeatMark. ``noCard`` maps a transcription
 index to ``repair``, ``blank``, or ``damaged``.
+
+Columns marked ``approved`` in the review sidecar, or that contain a box with
+``approved: true``, are refused. The file is left unchanged.
 """
 
 from __future__ import annotations
@@ -109,6 +112,74 @@ def apply_spec(document: dict, spec: dict, chars: list[str] | None = None) -> di
     return data
 
 
+class ApplyBlocked(Exception):
+    """Spec names a column a person has already approved."""
+
+    def __init__(self, columns: list[dict]) -> None:
+        self.columns = columns
+        super().__init__("refusing to replace user-approved columns")
+
+
+def spec_targets(spec: dict) -> list[tuple[str, int]]:
+    """Columns a spec would replace: ``(plate id, col)``."""
+    if not isinstance(spec, dict):
+        return []
+    plates = spec.get("plates") if isinstance(spec.get("plates"), dict) else spec
+    if not isinstance(plates, dict):
+        return []
+    targets: list[tuple[str, int]] = []
+    for plate_id, columns in plates.items():
+        if not isinstance(columns, dict):
+            continue
+        for col_key, entry in columns.items():
+            if not isinstance(entry, dict) or "spans" not in entry:
+                continue
+            if isinstance(col_key, bool):
+                continue
+            try:
+                col = int(col_key)
+            except (TypeError, ValueError):
+                continue
+            targets.append((str(plate_id), col))
+    return targets
+
+
+def execute_apply(
+    boxes_path: Path,
+    document: dict,
+    spec: dict,
+    chars: list[str] | None,
+    *,
+    label: str,
+    dry_run: bool,
+    review_state: dict | None = None,
+) -> dict:
+    """Apply ``spec`` unless it names an approved column.
+
+    Does not write when ``dry_run`` is set. Raises ``ApplyBlocked`` before any
+    backup or write. Raises ``ValueError`` for a malformed span.
+    """
+    from cba.review_state import targeted_protected
+
+    blocked = targeted_protected(document, spec, review_state)
+    if blocked:
+        raise ApplyBlocked(blocked)
+    updated = apply_spec(document, spec, chars)
+    backup: Path | None = None
+    if not dry_run:
+        safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in label) or "spec"
+        backup = boxes_path.with_name(boxes_path.name + ".pre_" + safe)
+        backup.write_bytes(boxes_path.read_bytes())
+        save_boxes(boxes_path, updated)
+    applied = []
+    plates = updated.get("plates") if isinstance(updated.get("plates"), dict) else {}
+    for plate_id, col in spec_targets(spec):
+        boxes = plates.get(plate_id) or []
+        count = sum(1 for box in boxes if isinstance(box, dict) and box.get("col") == col)
+        applied.append({"plate": plate_id, "col": col, "boxes": count})
+    return {"document": updated, "backup": backup, "applied": applied, "dryRun": dry_run}
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Apply a column spec JSON onto boxes.json.")
     add_common_arguments(parser, crop=False)
@@ -127,21 +198,43 @@ def main(argv: list[str] | None = None) -> int:
     spec_path = Path(args.spec).expanduser()
     if not spec_path.is_absolute():
         spec_path = (Path.cwd() / spec_path).resolve()
-    spec = json.loads(spec_path.read_text(encoding="utf-8-sig"))
+    try:
+        spec = json.loads(spec_path.read_text(encoding="utf-8-sig"))
+    except (OSError, json.JSONDecodeError) as exc:
+        print(f"invalid spec: {exc}", file=sys.stderr)
+        return 1
     from boxannotator import discover_plates
+    from cba.review_state import ReviewError, load_review, review_sidecar
 
     plate_ids = [plate_id for plate_id, _ in discover_plates(settings.plates_dir, settings.plate_glob)]
     document = load_boxes(settings.boxes_path, plate_ids, settings.source)
-    updated = apply_spec(document, spec, load_text_chars(settings.text_path))
+    try:
+        review = load_review(review_sidecar(settings.boxes_path))
+    except ReviewError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    try:
+        result = execute_apply(
+            settings.boxes_path,
+            document,
+            spec,
+            load_text_chars(settings.text_path),
+            label=args.label,
+            dry_run=args.dry_run,
+            review_state=review,
+        )
+    except ApplyBlocked as exc:
+        names = ", ".join(f"{item['plate']} col {item['col']}" for item in exc.columns)
+        print(f"refusing to replace user-approved columns: {names}", file=sys.stderr)
+        return 1
+    except ValueError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
     if args.dry_run:
-        json.dump(updated, sys.stdout, ensure_ascii=False, indent=2)
+        json.dump(result["document"], sys.stdout, ensure_ascii=False, indent=2)
         sys.stdout.write("\n")
         return 0
-    label = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in args.label) or "spec"
-    backup = settings.boxes_path.with_name(settings.boxes_path.name + ".pre_" + label)
-    backup.write_bytes(settings.boxes_path.read_bytes())
-    save_boxes(settings.boxes_path, updated)
-    print(f"backup {backup}")
+    print(f"backup {result['backup']}")
     print(f"wrote {settings.boxes_path}")
     return 0
 

@@ -13,6 +13,8 @@ boxes.json
 cropped/
 sheets/
 *.pre_*
+*.review.json
+review/
 
 # Scratch
 *.tmp

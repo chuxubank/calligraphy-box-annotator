@@ -743,6 +743,7 @@
             item.noCardReason = b.noCardReason;
           }
         }
+        if (b.approved === true) item.approved = true;
         return item;
       });
     }
@@ -785,6 +786,7 @@
           repeatMark: b.repeatMark === true,
           noCard: b.noCard === true,
           noCardReason: typeof b.noCardReason === "string" ? b.noCardReason : "",
+          approved: b.approved === true,
         };
       });
       const off = savedOffsets[pid];

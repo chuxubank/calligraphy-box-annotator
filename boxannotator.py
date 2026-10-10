@@ -348,6 +348,9 @@ def clean_box(raw: object) -> dict | None:
         reason = raw.get("noCardReason")
         if reason in NO_CARD_REASONS:
             item["noCardReason"] = reason
+    # A person sets this. Agents must not clear it; apply-spec refuses the column.
+    if raw.get("approved") is True:
+        item["approved"] = True
     return item
 
 
