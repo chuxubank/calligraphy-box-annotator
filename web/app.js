@@ -563,7 +563,9 @@
     }
     state.mode = "idle"; state.lastPointer = null;
     els.canvas.style.cursor = state.spaceDown ? "grab" : "crosshair";
-    updateStatus(); draw();
+    // Toolbar buttons also receive mouseup. Refreshing the inputs here would
+    // wipe a suggested 序号 before the button's click handler can read it.
+    if (gesture) { updateStatus(); draw(); }
   }
   function deleteSelected() {
     if (state.selectedId == null) { msg("未选中框", false); return; }
